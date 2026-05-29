@@ -1,708 +1,1547 @@
-import { useEffect, useState } from "react";
-import {
-  login as firebaseLogin,
-  logout as firebaseLogout,
-  register as firebaseRegister,
-  updateUserProfile,
-  watchAuth,
-} from "./firebase/auth";
-import { createDeal } from "./firebase/deals";
-import { isFirebaseReady } from "./firebase/config";
-import { addWorker, getWorkers } from "./firebase/workers";
+import { useEffect, useMemo, useState } from 'react'
+import heroArt from './assets/hero.png'
+import './App.css'
 
-const WORKERS = [
-  { id: 1, name: "Jasur Toshmatov", specialty: "Santexnik", emoji: "🔧", color: "#FF6B35", price: "50,000", rating: 4.9, reviews: 87, location: "Chilonzor", available: true, desc: "Quvur, kran, unitaz ta'mirlash. 10 yillik tajriba." },
-  { id: 2, name: "Bobur Yusupov", specialty: "Elektrik", emoji: "⚡", color: "#FFB703", price: "30,000", rating: 4.8, reviews: 64, location: "Yunusobod", available: true, desc: "Rozetka, svet, щit ta'mirlash. Xavfsizlik kafolati." },
-  { id: 3, name: "Sardor Nazarov", specialty: "Mebel", emoji: "🪑", color: "#2EC4B6", price: "40,000", rating: 4.7, reviews: 43, location: "Mirzo Ulug'bek", available: false, desc: "Divan, stul, shkaf ta'mirlash. Uyga kelaman." },
-  { id: 4, name: "Otabek Karimov", specialty: "Qurilish", emoji: "🏗️", color: "#8338EC", price: "70,000", rating: 4.6, reviews: 31, location: "Shayxontohur", available: true, desc: "Devor suvoq, plitka, bo'yash. Narx kelishiladi." },
-  { id: 5, name: "Dilshod Ergashev", specialty: "Konditsioner", emoji: "❄️", color: "#06D6A0", price: "60,000", rating: 4.9, reviews: 112, location: "Yakkasaroy", available: true, desc: "Konditsioner o'rnatish, ta'mirlash, gaz to'ldirish." },
-  { id: 6, name: "Firdavs Mirzayev", specialty: "Santexnik", emoji: "🚿", color: "#FB5607", price: "45,000", rating: 4.5, reviews: 29, location: "Uchtepa", available: true, desc: "Vannaxona jihozlari. Tez kelaman, kafolatli." },
-];
+const SITE_URL = import.meta.env.VITE_SITE_URL || 'https://ustafix.uz'
+const PHONE_NUMBER = import.meta.env.VITE_CONTACT_PHONE || '+998901234567'
+const TELEGRAM_URL = import.meta.env.VITE_TELEGRAM_URL || 'https://t.me/ustafix_uz'
+const WHATSAPP_URL =
+  import.meta.env.VITE_WHATSAPP_URL ||
+  `https://wa.me/998901234567?text=${encodeURIComponent('Salom, UstaFix orqali xizmat kerak.')}`
 
-const CATEGORIES = [
-  { label: "Hammasi", emoji: "🔍" },
-  { label: "Santexnik", emoji: "🔧" },
-  { label: "Elektrik", emoji: "⚡" },
-  { label: "Qurilish", emoji: "🏗️" },
-  { label: "Konditsioner", emoji: "❄️" },
-  { label: "Mebel", emoji: "🪑" },
-];
+const NAV_ITEMS = [
+  { href: '/', label: 'Bosh sahifa' },
+  { href: '/santexnik-chaqirish', label: 'Santexnik' },
+  { href: '/elektrik-chaqirish', label: 'Elektrik' },
+  { href: '/konditsioner-tamiri', label: 'Konditsioner' },
+  { href: '/toshkent', label: 'Toshkent' },
+  { href: '/kontakt', label: 'Kontakt' },
+]
 
-const STEPS = [
-  { n: "01", emoji: "📝", title: "E'lon qidiring", desc: "O'zingizga kerakli usta turini tanlang va yaqiningizdagilarni ko'ring." },
-  { n: "02", emoji: "❤️", title: "Yoqtiring", desc: "Ustaning profili, reytingi va narxini o'rganib, yoqsa belgilang." },
-  { n: "03", emoji: "🤝", title: "Deal qiling", desc: "Usta bilan to'g'ridan-to'g'ri bog'laning va ish boshlang." },
-];
+const SERVICE_OPTIONS = [
+  'Barchasi',
+  'Santexnik',
+  'Elektrik',
+  'Konditsioner',
+  'Maishiy texnika',
+  'Remont',
+  'Dizayn',
+]
 
-const STATS = [
-  { val: "2,400+", label: "Ro'yxatdan o'tgan usta" },
-  { val: "18,000+", label: "Bajarilgan buyurtma" },
-  { val: "4.8★", label: "O'rtacha reyting" },
-  { val: "98%", label: "Mijozlar mamnun" },
-];
-
-const normalizePhone = (phone) => phone.replace(/\D/g, "");
-
-const phoneToEmail = (phone) => `${normalizePhone(phone)}@ustafix.local`;
-
-const getPhoneFromEmail = (email) => {
-  if (!email) return "";
-  return email.endsWith("@ustafix.local")
-    ? email.replace("@ustafix.local", "")
-    : email;
-};
-
-const makeUser = (firebaseUser, fallback = {}) => ({
-  uid: firebaseUser.uid,
-  name: firebaseUser.displayName || fallback.name || getPhoneFromEmail(firebaseUser.email) || "Foydalanuvchi",
-  phone: fallback.phone || getPhoneFromEmail(firebaseUser.email),
-  email: firebaseUser.email || "",
-});
-
-const getAuthErrorMessage = (error) => {
-  if (error?.code === "auth/email-already-in-use") return "Bu telefon bilan account bor. Kirish bo'limidan kiring.";
-  if (error?.code === "auth/invalid-credential") return "Telefon yoki parol noto'g'ri.";
-  if (error?.code === "auth/operation-not-allowed") return "Firebase Console'da Email/Password auth yoqilmagan.";
-  if (error?.code === "auth/weak-password") return "Parol kamida 6 ta belgi bo'lishi kerak.";
-  return "Auth xato berdi. Ma'lumotlarni tekshirib qayta urinib ko'ring.";
-};
-
-export default function App() {
-  const [page, setPage] = useState("home");
-  const [filter, setFilter] = useState("Hammasi");
-  const [search, setSearch] = useState("");
-  const [liked, setLiked] = useState([]);
-  const [modal, setModal] = useState(null); // null | "login" | "register" | "post" | worker
-  const [authTab, setAuthTab] = useState("login");
-  const [user, setUser] = useState(null);
-  const [form, setForm] = useState({ name: "", phone: "", password: "", specialty: "", desc: "", price: "", location: "" });
-  const [authStep, setAuthStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [posted, setPosted] = useState([]);
-  const [remoteWorkers, setRemoteWorkers] = useState([]);
-  const [dealed, setDealed] = useState([]);
-  const [dealDone, setDealDone] = useState(false);
-  const [dealMessage, setDealMessage] = useState("");
-  const [syncMessage, setSyncMessage] = useState("");
-
-  useEffect(() => {
-    if (!isFirebaseReady) return;
-
-    getWorkers()
-      .then(setRemoteWorkers)
-      .catch((error) => {
-        console.error(error);
-        setSyncMessage("Firebase workers o'qishda xato chiqdi");
-      });
-  }, []);
-
-  useEffect(() => {
-    if (!isFirebaseReady) return;
-
-    const unsubscribe = watchAuth((firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null);
-        return;
-      }
-
-      setUser((currentUser) => currentUser?.uid === firebaseUser.uid
-        ? currentUser
-        : makeUser(firebaseUser));
-    });
-
-    return unsubscribe;
-  }, []);
-
-  const allWorkers = [...WORKERS, ...remoteWorkers, ...posted];
-
-  const filtered = allWorkers.filter(w => {
-    const matchCat = filter === "Hammasi" || w.specialty === filter;
-    const matchSearch = w.name.toLowerCase().includes(search.toLowerCase()) ||
-      w.specialty.toLowerCase().includes(search.toLowerCase()) ||
-      w.location?.toLowerCase().includes(search.toLowerCase());
-    return matchCat && matchSearch;
-  });
-
-  const toggleLike = (id) => setLiked(l => l.includes(id) ? l.filter(x => x !== id) : [...l, id]);
-
-  const handleLogin = async () => {
-    setAuthError("");
-    const normalizedPhone = normalizePhone(form.phone);
-
-    if (!isFirebaseReady) return setAuthError("Firebase config topilmadi");
-    if (!normalizedPhone || !form.password) return setAuthError("Barcha maydonlarni to'ldiring");
-
-    setLoading(true);
-
-    try {
-      const credential = await firebaseLogin(phoneToEmail(form.phone), form.password);
-      setUser(makeUser(credential.user, { phone: normalizedPhone }));
-      setModal(null);
-      setForm({ ...form, phone: normalizedPhone, password: "" });
-    } catch (error) {
-      console.error(error);
-      setAuthError(getAuthErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRegister = async () => {
-    setAuthError("");
-    const normalizedPhone = normalizePhone(form.phone);
-
-    if (authStep === 1 && !form.name) return setAuthError("Ismingizni kiriting");
-    if (authStep === 1) return setAuthStep(2);
-    if (authStep === 2 && normalizedPhone.length < 9) return setAuthError("To'g'ri telefon kiriting");
-    if (authStep === 2) return setAuthStep(3);
-    if (!isFirebaseReady) return setAuthError("Firebase config topilmadi");
-    if (!form.password || form.password.length < 6) return setAuthError("Parol kamida 6 ta belgi");
-
-    setLoading(true);
-
-    try {
-      const credential = await firebaseRegister(phoneToEmail(form.phone), form.password);
-      await updateUserProfile({ displayName: form.name });
-      setUser(makeUser(credential.user, { name: form.name, phone: normalizedPhone }));
-      setModal(null);
-      setAuthStep(1);
-      setForm({ ...form, phone: normalizedPhone, password: "" });
-    } catch (error) {
-      console.error(error);
-      setAuthError(getAuthErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePost = async () => {
-    if (!form.specialty || !form.name) return;
-    const colors = ["#FF6B35","#FFB703","#2EC4B6","#8338EC","#06D6A0","#FB5607"];
-    const emojis = { Santexnik:"🔧", Elektrik:"⚡", Qurilish:"🏗️", Konditsioner:"❄️", Mebel:"🪑" };
-    const worker = {
-      id: Date.now(),
-      name: form.name,
-      specialty: form.specialty,
-      emoji: emojis[form.specialty] || "🛠️",
-      color: colors[Math.floor(Math.random()*colors.length)],
-      price: form.price || "Kelishiladi", rating: 5.0, reviews: 0,
-      location: form.location || "Toshkent", available: true,
-      desc: form.desc || "Yangi usta",
-      ownerId: user?.uid || null,
-      ownerPhone: user?.phone || "",
-    };
-
-    if (isFirebaseReady) {
-      try {
-        const docRef = await addWorker(worker);
-        worker.id = docRef.id;
-        setSyncMessage("E'lon Firestore'ga saqlandi");
-      } catch (error) {
-        console.error(error);
-        setSyncMessage("Firebase xato berdi, e'lon faqat local qo'shildi");
-      }
-    }
-
-    setPosted(p => [...p, worker]);
-    setModal(null);
-    setForm({ name:"", phone:"", password:"", specialty:"", desc:"", price:"", location:"" });
-  };
-
-  const handleDeal = (w) => {
-    setDealDone(false);
-    setDealMessage("");
-    setModal({ type: "deal", worker: w });
-  };
-
-  const confirmDeal = async (w) => {
-    if (isFirebaseReady) {
-      try {
-        await createDeal({
-          workerId: String(w.id),
-          workerName: w.name,
-          specialty: w.specialty,
-          clientId: user?.uid || user?.phone || "guest",
-          clientName: user?.name || "Guest",
-          clientPhone: user?.phone || "",
-          message: dealMessage.trim(),
-          priceOffer: w.price,
-        });
-        setSyncMessage("Deal Firestore'ga saqlandi");
-      } catch (error) {
-        console.error(error);
-        setSyncMessage("Firebase xato berdi, deal faqat local belgilandi");
-      }
-    }
-
-    setDealDone(true);
-    setDealed(d => [...d, w.id]);
-    setTimeout(() => { setModal(null); setDealDone(false); }, 2000);
-  };
-
-  const handleLogout = async () => {
-    if (isFirebaseReady) {
-      try {
-        await firebaseLogout();
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    setUser(null);
-    setPage("home");
-  };
-
-  return (
-    <div style={{ minHeight:"100vh", background:"#0D0D0D", color:"#fff", fontFamily:"'Segoe UI',system-ui,sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:#111;}::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
-        a{text-decoration:none;color:inherit;cursor:pointer;}
-        .btn{padding:12px 24px;border-radius:12px;border:none;cursor:pointer;font-weight:600;font-size:14px;transition:all 0.2s;font-family:'DM Sans',sans-serif;}
-        .btn:active{transform:scale(0.97);}
-        .btn-orange{background:linear-gradient(135deg,#FF6B35,#FF8C42);color:#fff;}
-        .btn-orange:hover{box-shadow:0 8px 24px #FF6B3540;transform:translateY(-1px);}
-        .btn-ghost{background:transparent;border:1.5px solid #333;color:#aaa;}
-        .btn-ghost:hover{border-color:#FF6B35;color:#FF6B35;}
-        .card{background:#1a1a1a;border:1px solid #252525;border-radius:20px;overflow:hidden;transition:transform 0.2s,box-shadow 0.2s;}
-        .card:hover{transform:translateY(-4px);box-shadow:0 16px 48px rgba(0,0,0,0.4);}
-        .input{background:#1e1e1e;border:1.5px solid #2a2a2a;border-radius:12px;padding:12px 16px;color:#fff;font-size:14px;width:100%;outline:none;transition:border 0.2s;font-family:'DM Sans',sans-serif;}
-        .input:focus{border-color:#FF6B35;box-shadow:0 0 0 3px #FF6B3515;}
-        .input::placeholder{color:#444;}
-        .label{color:#555;font-size:11px;font-weight:600;letter-spacing:0.08em;margin-bottom:6px;display:block;}
-        @keyframes fadeIn{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
-        @keyframes slideUp{from{opacity:0;transform:translateY(30px);}to{opacity:1;transform:translateY(0);}}
-        @keyframes pop{0%{transform:scale(0.6);opacity:0;}70%{transform:scale(1.05);}100%{transform:scale(1);opacity:1;}}
-        @keyframes spin{to{transform:rotate(360deg);}}
-        .fade-in{animation:fadeIn 0.4s ease;}
-        .slide-up{animation:slideUp 0.4s ease;}
-        .pop{animation:pop 0.4s ease;}
-        .spin{animation:spin 0.8s linear infinite;display:inline-block;width:18px;height:18px;border:2px solid #fff4;border-top-color:#fff;border-radius:50%;}
-        .nav-link{color:#666;font-size:14px;font-weight:500;transition:color 0.2s;cursor:pointer;}
-        .nav-link:hover{color:#fff;}
-        .stat-card{background:#1a1a1a;border:1px solid #252525;border-radius:16px;padding:24px;text-align:center;}
-        .tag{background:#FF6B3518;border:1px solid #FF6B3530;color:#FF6B35;border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;}
-        .overlay{position:fixed;inset:0;background:#000000cc;z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;}
-        .modal{background:#161616;border:1px solid #252525;border-radius:24px;padding:32px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;}
-        .step-dot{width:10px;height:10px;border-radius:50%;transition:all 0.3s;}
-        @media(max-width:768px){.hide-mobile{display:none!important;}.desktop-only{display:none!important;}}
-      `}</style>
-
-      {/* ── NAVBAR ── */}
-      <nav style={{ position:"sticky", top:0, zIndex:50, background:"#0D0D0Dee", backdropFilter:"blur(20px)", borderBottom:"1px solid #1a1a1a" }}>
-        <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px", height:64, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          {/* Logo */}
-          <div onClick={() => setPage("home")} style={{ fontFamily:"'Syne',sans-serif", fontSize:24, fontWeight:800, cursor:"pointer" }}>
-            Usta<span style={{ color:"#FF6B35" }}>Top</span>
-          </div>
-          {/* Links */}
-          <div className="hide-mobile" style={{ display:"flex", gap:32, alignItems:"center" }}>
-            <span className="nav-link" onClick={() => setPage("home")}>Bosh sahifa</span>
-            <span className="nav-link" onClick={() => setPage("ustalar")}>Ustalar</span>
-            <span className="nav-link" onClick={() => setPage("qanday")}>Qanday ishlaydi</span>
-            {user && <span className="nav-link" onClick={() => setPage("profil")}>Profil</span>}
-          </div>
-          {/* Auth */}
-          <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-            {user ? (
-              <>
-                <button className="btn btn-ghost" onClick={() => { setModal("post"); setForm({...form,name:user.name}); }}>+ E'lon</button>
-                <div onClick={() => setPage("profil")} style={{ width:38, height:38, borderRadius:"50%", background:"linear-gradient(135deg,#FF6B35,#FF8C42)", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:16 }}>
-                  {user.name[0].toUpperCase()}
-                </div>
-              </>
-            ) : (
-              <>
-                <button className="btn btn-ghost hide-mobile" onClick={() => { setModal("login"); setAuthTab("login"); setAuthError(""); }}>Kirish</button>
-                <button className="btn btn-orange" onClick={() => { setModal("login"); setAuthTab("register"); setAuthStep(1); setAuthError(""); }}>Ro'yxatdan</button>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
-
-      {syncMessage && (
-        <div style={{ maxWidth:1200, margin:"14px auto 0", padding:"0 24px" }}>
-          <div style={{ background:"#1a1a1a", border:"1px solid #252525", borderRadius:12, padding:"10px 14px", color:"#888", fontSize:13 }}>
-            {syncMessage}
-          </div>
-        </div>
-      )}
-
-      {/* ── HOME PAGE ── */}
-      {page === "home" && (
-        <div>
-          {/* Hero */}
-          <div style={{ maxWidth:1200, margin:"0 auto", padding:"80px 24px 60px", textAlign:"center" }}>
-            <div className="tag" style={{ display:"inline-block", marginBottom:20 }}>🔧 O'zbekistondagi №1 usta platformasi</div>
-            <h1 className="fade-in" style={{ fontFamily:"'Syne',sans-serif", fontSize:"clamp(36px,6vw,72px)", fontWeight:800, lineHeight:1.1, marginBottom:20, letterSpacing:-2 }}>
-              Ta'mirlash ustasini<br /><span style={{ color:"#FF6B35" }}>1 daqiqada</span> toping
-            </h1>
-            <p className="fade-in" style={{ color:"#666", fontSize:18, maxWidth:540, margin:"0 auto 40px", lineHeight:1.7 }}>
-              Santexnik, elektrik, qurilish va boshqa mutaxassislar — barchasi bir joyda. Bepul, tez, ishonchli.
-            </p>
-            {/* Search bar */}
-            <div className="fade-in" style={{ maxWidth:600, margin:"0 auto 20px", display:"flex", gap:10, background:"#1a1a1a", border:"1px solid #252525", borderRadius:16, padding:8 }}>
-              <input className="input" placeholder="🔍  Qidirish... (santexnik, elektrik, Chilonzor...)" value={search} onChange={e => setSearch(e.target.value)}
-                style={{ border:"none", background:"transparent", flex:1 }} onKeyDown={e => e.key === "Enter" && setPage("ustalar")} />
-              <button className="btn btn-orange" onClick={() => setPage("ustalar")} style={{ padding:"12px 28px", whiteSpace:"nowrap" }}>Qidirish</button>
-            </div>
-            <div style={{ color:"#444", fontSize:13 }}>Mashhur: <span style={{ color:"#FF6B35", cursor:"pointer" }} onClick={() => { setFilter("Santexnik"); setPage("ustalar"); }}>Santexnik</span> · <span style={{ color:"#FF6B35", cursor:"pointer" }} onClick={() => { setFilter("Elektrik"); setPage("ustalar"); }}>Elektrik</span> · <span style={{ color:"#FF6B35", cursor:"pointer" }} onClick={() => { setFilter("Konditsioner"); setPage("ustalar"); }}>Konditsioner</span></div>
-          </div>
-
-          {/* Stats */}
-          <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px 80px" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:16 }}>
-              {STATS.map((s,i) => (
-                <div key={i} className="stat-card fade-in" style={{ animationDelay:`${i*0.1}s` }}>
-                  <div style={{ fontFamily:"'Syne',sans-serif", fontSize:32, fontWeight:800, color:"#FF6B35", marginBottom:6 }}>{s.val}</div>
-                  <div style={{ color:"#555", fontSize:13 }}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Categories */}
-          <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px 80px" }}>
-            <div style={{ marginBottom:32 }}>
-              <div className="tag" style={{ marginBottom:12 }}>Kategoriyalar</div>
-              <h2 style={{ fontFamily:"'Syne',sans-serif", fontSize:36, fontWeight:800 }}>Qanday usta kerak?</h2>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:14 }}>
-              {CATEGORIES.filter(c => c.label !== "Hammasi").map((c,i) => (
-                <div key={i} className="card" onClick={() => { setFilter(c.label); setPage("ustalar"); }} style={{ padding:24, textAlign:"center", cursor:"pointer" }}>
-                  <div style={{ fontSize:36, marginBottom:12 }}>{c.emoji}</div>
-                  <div style={{ fontWeight:600, fontSize:14 }}>{c.label}</div>
-                  <div style={{ color:"#555", fontSize:12, marginTop:4 }}>
-                    {allWorkers.filter(w => w.specialty === c.label).length} usta
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* How it works */}
-          <div style={{ background:"#111", borderTop:"1px solid #1a1a1a", borderBottom:"1px solid #1a1a1a", padding:"80px 24px" }}>
-            <div style={{ maxWidth:1200, margin:"0 auto" }}>
-              <div style={{ textAlign:"center", marginBottom:48 }}>
-                <div className="tag" style={{ marginBottom:12 }}>Jarayon</div>
-                <h2 style={{ fontFamily:"'Syne',sans-serif", fontSize:36, fontWeight:800 }}>Qanday ishlaydi?</h2>
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:24 }}>
-                {STEPS.map((s,i) => (
-                  <div key={i} className="card" style={{ padding:28 }}>
-                    <div style={{ fontFamily:"'Syne',sans-serif", fontSize:48, fontWeight:800, color:"#FF6B3520", marginBottom:8 }}>{s.n}</div>
-                    <div style={{ fontSize:32, marginBottom:12 }}>{s.emoji}</div>
-                    <div style={{ fontWeight:700, fontSize:18, marginBottom:8, fontFamily:"'Syne',sans-serif" }}>{s.title}</div>
-                    <div style={{ color:"#666", fontSize:14, lineHeight:1.6 }}>{s.desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Featured workers */}
-          <div style={{ maxWidth:1200, margin:"0 auto", padding:"80px 24px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:32, flexWrap:"wrap", gap:12 }}>
-              <div>
-                <div className="tag" style={{ marginBottom:12 }}>Eng yaxshilar</div>
-                <h2 style={{ fontFamily:"'Syne',sans-serif", fontSize:36, fontWeight:800 }}>Top ustalar</h2>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setPage("ustalar")}>Hammasini ko'rish →</button>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:20 }}>
-              {allWorkers.slice(0,3).map(w => <WorkerCard key={w.id} w={w} liked={liked} dealed={dealed} onLike={toggleLike} onDeal={handleDeal} />)}
-            </div>
-          </div>
-
-          {/* CTA */}
-          <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px 80px" }}>
-            <div style={{ background:"linear-gradient(135deg,#FF6B3520,#FF8C4210)", border:"1px solid #FF6B3530", borderRadius:24, padding:"48px 32px", textAlign:"center" }}>
-              <div style={{ fontSize:48, marginBottom:16 }}>🔧</div>
-              <h2 style={{ fontFamily:"'Syne',sans-serif", fontSize:32, fontWeight:800, marginBottom:12 }}>Siz ham usta misiz?</h2>
-              <p style={{ color:"#888", fontSize:15, marginBottom:28, maxWidth:400, margin:"0 auto 28px" }}>
-                Xizmatingizni e'lon qiling va minglab mijozlarga yeting. Ro'yxatdan o'tish — bepul!
-              </p>
-              <button className="btn btn-orange" style={{ padding:"14px 36px", fontSize:16 }}
-                onClick={() => user ? setModal("post") : (setModal("login"), setAuthTab("register"), setAuthStep(1))}>
-                E'lon qilish — Bepul
-              </button>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <footer style={{ background:"#0a0a0a", borderTop:"1px solid #1a1a1a", padding:"32px 24px", textAlign:"center" }}>
-            <div style={{ fontFamily:"'Syne',sans-serif", fontSize:20, fontWeight:800, marginBottom:8 }}>
-              Usta<span style={{ color:"#FF6B35" }}>Top</span>
-            </div>
-            <div style={{ color:"#444", fontSize:13 }}>© 2025 UstaTop. Barcha huquqlar himoyalangan.</div>
-          </footer>
-        </div>
-      )}
-
-      {/* ── USTALAR PAGE ── */}
-      {page === "ustalar" && (
-        <div style={{ maxWidth:1200, margin:"0 auto", padding:"40px 24px" }}>
-          <div style={{ marginBottom:32 }}>
-            <h1 style={{ fontFamily:"'Syne',sans-serif", fontSize:36, fontWeight:800, marginBottom:8 }}>Ustalar</h1>
-            <div style={{ color:"#555", fontSize:14 }}>{filtered.length} ta usta topildi</div>
-          </div>
-
-          {/* Search + Filter */}
-          <div style={{ display:"flex", gap:12, marginBottom:24, flexWrap:"wrap" }}>
-            <div style={{ flex:1, minWidth:200, position:"relative" }}>
-              <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)" }}>🔍</span>
-              <input className="input" placeholder="Qidirish..." value={search} onChange={e => setSearch(e.target.value)}
-                style={{ paddingLeft:40 }} />
-            </div>
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-              {CATEGORIES.map(c => (
-                <button key={c.label} className="btn" onClick={() => setFilter(c.label)} style={{
-                  padding:"10px 16px", background: filter === c.label ? "#FF6B35" : "#1a1a1a",
-                  color: filter === c.label ? "#fff" : "#666",
-                  border: filter === c.label ? "none" : "1px solid #252525",
-                  borderRadius:10, fontSize:13,
-                }}>{c.emoji} {c.label}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Grid */}
-          <div className="fade-in" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:20 }}>
-            {filtered.map(w => <WorkerCard key={w.id} w={w} liked={liked} dealed={dealed} onLike={toggleLike} onDeal={handleDeal} />)}
-            {filtered.length === 0 && (
-              <div style={{ gridColumn:"1/-1", textAlign:"center", padding:"80px 0", color:"#444" }}>
-                <div style={{ fontSize:48, marginBottom:16 }}>🔍</div>
-                <div style={{ fontSize:18 }}>Hech narsa topilmadi</div>
-              </div>
-            )}
-          </div>
-
-          {/* Post CTA */}
-          {user && (
-            <div style={{ marginTop:48, textAlign:"center" }}>
-              <button className="btn btn-orange" style={{ padding:"14px 36px", fontSize:15 }} onClick={() => setModal("post")}>
-                ➕ O'z e'loningizni qo'shing
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── QANDAY ISHLAYDI ── */}
-      {page === "qanday" && (
-        <div style={{ maxWidth:800, margin:"0 auto", padding:"60px 24px" }}>
-          <div style={{ textAlign:"center", marginBottom:48 }}>
-            <div className="tag" style={{ marginBottom:16 }}>Yo'riqnoma</div>
-            <h1 style={{ fontFamily:"'Syne',sans-serif", fontSize:42, fontWeight:800, marginBottom:16 }}>Qanday ishlaydi?</h1>
-            <p style={{ color:"#666", fontSize:16, lineHeight:1.7 }}>UstaTop orqali xizmat topish juda oson. 3 ta qadam — va usta uyingizda.</p>
-          </div>
-          {STEPS.map((s,i) => (
-            <div key={i} className="card fade-in" style={{ padding:32, marginBottom:16, display:"flex", gap:24, alignItems:"flex-start", animationDelay:`${i*0.15}s` }}>
-              <div style={{ fontFamily:"'Syne',sans-serif", fontSize:56, fontWeight:800, color:"#FF6B3525", lineHeight:1, flexShrink:0 }}>{s.n}</div>
-              <div>
-                <div style={{ fontSize:32, marginBottom:10 }}>{s.emoji}</div>
-                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:700, marginBottom:8 }}>{s.title}</div>
-                <div style={{ color:"#666", lineHeight:1.7, fontSize:15 }}>{s.desc}</div>
-              </div>
-            </div>
-          ))}
-          <div style={{ textAlign:"center", marginTop:40 }}>
-            <button className="btn btn-orange" style={{ padding:"14px 36px", fontSize:16 }} onClick={() => setPage("ustalar")}>
-              Hozir boshlash →
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── PROFIL ── */}
-      {page === "profil" && user && (
-        <div style={{ maxWidth:700, margin:"0 auto", padding:"60px 24px" }}>
-          <div className="card fade-in" style={{ padding:32, marginBottom:24, textAlign:"center" }}>
-            <div style={{ width:80, height:80, borderRadius:"50%", background:"linear-gradient(135deg,#FF6B35,#FF8C42)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, margin:"0 auto 16px" }}>
-              {user.name[0].toUpperCase()}
-            </div>
-            <div style={{ fontFamily:"'Syne',sans-serif", fontSize:24, fontWeight:800, marginBottom:4 }}>{user.name}</div>
-            <div style={{ color:"#555", fontSize:14 }}>{user.phone}</div>
-          </div>
-
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:24 }}>
-            {[["❤️", "Yoqtirilgan", liked.length],["🤝","Deal qilingan",dealed.length],["📝","E'lonlar",posted.length],["⭐","Reyting","—"]].map(([e,l,v]) => (
-              <div key={l} className="stat-card">
-                <div style={{ fontSize:28, marginBottom:8 }}>{e}</div>
-                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:28, fontWeight:800, color:"#FF6B35" }}>{v}</div>
-                <div style={{ color:"#555", fontSize:13, marginTop:4 }}>{l}</div>
-              </div>
-            ))}
-          </div>
-
-          <button className="btn btn-ghost" style={{ width:"100%", padding:14 }} onClick={handleLogout}>
-            Chiqish (Logout)
-          </button>
-        </div>
-      )}
-
-      {/* ── MODALS ── */}
-      {modal && (
-        <div className="overlay" onClick={e => e.target === e.currentTarget && (setModal(null), setDealDone(false))}>
-          <div className="modal slide-up">
-
-            {/* LOGIN/REGISTER */}
-            {(modal === "login") && (
-              <>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
-                  <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800 }}>
-                    {authTab === "login" ? "Kirish" : "Ro'yxatdan o'tish"}
-                  </div>
-                  <button onClick={() => setModal(null)} style={{ background:"#1e1e1e", border:"none", borderRadius:10, width:36, height:36, color:"#fff", cursor:"pointer", fontSize:16 }}>✕</button>
-                </div>
-
-                <div style={{ display:"flex", background:"#1a1a1a", borderRadius:12, padding:3, marginBottom:24 }}>
-                  {[["login","Kirish"],["register","Ro'yxatdan"]].map(([k,l]) => (
-                    <button key={k} onClick={() => { setAuthTab(k); setAuthStep(1); setAuthError(""); }} style={{
-                      flex:1, padding:"10px", border:"none", cursor:"pointer", borderRadius:10,
-                      background: authTab===k ? "#FF6B35" : "transparent",
-                      color: authTab===k ? "#fff" : "#555", fontWeight:600, fontSize:13, transition:"all 0.2s",
-                    }}>{l}</button>
-                  ))}
-                </div>
-
-                {authTab === "login" ? (
-                  <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                    <div><label className="label">TELEFON</label><input className="input" placeholder="+998 90 123 45 67" value={form.phone} onChange={e => setForm({...form,phone:e.target.value})} /></div>
-                    <div><label className="label">PAROL</label><input className="input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm({...form,password:e.target.value})} /></div>
-                    {authError && <div style={{ background:"#FF6B3518", border:"1px solid #FF6B3540", borderRadius:10, padding:"10px 14px", color:"#FF6B35", fontSize:13 }}>⚠️ {authError}</div>}
-                    <button className="btn btn-orange" style={{ padding:14, marginTop:4 }} onClick={handleLogin}>
-                      {loading ? <span className="spin" /> : "Kirish →"}
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                    <div style={{ display:"flex", gap:6, marginBottom:4 }}>
-                      {[1,2,3].map(s => <div key={s} style={{ flex:1, height:4, borderRadius:4, background: authStep>=s ? "#FF6B35" : "#2a2a2a", transition:"background 0.3s" }} />)}
-                    </div>
-                    {authStep===1 && <><div><label className="label">TO'LIQ ISM</label><input className="input" placeholder="Jasur Toshmatov" value={form.name} onChange={e => setForm({...form,name:e.target.value})} /></div></>}
-                    {authStep===2 && <><div><label className="label">TELEFON</label><input className="input" placeholder="+998 90 123 45 67" value={form.phone} onChange={e => setForm({...form,phone:e.target.value})} /></div></>}
-                    {authStep===3 && <>
-                      <div><label className="label">PAROL</label><input className="input" type="password" placeholder="Kamida 6 belgi" value={form.password} onChange={e => setForm({...form,password:e.target.value})} /></div>
-                    </>}
-                    {authError && <div style={{ background:"#FF6B3518", border:"1px solid #FF6B3540", borderRadius:10, padding:"10px 14px", color:"#FF6B35", fontSize:13 }}>⚠️ {authError}</div>}
-                    <div style={{ display:"flex", gap:10 }}>
-                      {authStep > 1 && <button className="btn btn-ghost" style={{ flex:1, padding:13 }} onClick={() => { setAuthStep(s=>s-1); setAuthError(""); }}>← Orqaga</button>}
-                      <button className="btn btn-orange" style={{ flex:2, padding:13 }} onClick={handleRegister}>
-                        {loading ? <span className="spin" /> : authStep < 3 ? "Keyingisi →" : "Ro'yxatdan ✓"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* POST */}
-            {modal === "post" && (
-              <>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
-                  <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800 }}>E'lon qo'shish</div>
-                  <button onClick={() => setModal(null)} style={{ background:"#1e1e1e", border:"none", borderRadius:10, width:36, height:36, color:"#fff", cursor:"pointer", fontSize:16 }}>✕</button>
-                </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                  <div><label className="label">ISMINGIZ</label><input className="input" placeholder="To'liq ismingiz" value={form.name} onChange={e => setForm({...form,name:e.target.value})} /></div>
-                  <div>
-                    <label className="label">MUTAXASSISLIK</label>
-                    <select className="input" value={form.specialty} onChange={e => setForm({...form,specialty:e.target.value})}>
-                      <option value="">Tanlang...</option>
-                      {["Santexnik","Elektrik","Qurilish","Konditsioner","Mebel"].map(s => <option key={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div><label className="label">TAVSIF</label><textarea className="input" rows={3} placeholder="Xizmatingiz haqida..." value={form.desc} onChange={e => setForm({...form,desc:e.target.value})} style={{ resize:"none" }} /></div>
-                  <div><label className="label">NARX</label><input className="input" placeholder="masalan: 50,000 so'mdan" value={form.price} onChange={e => setForm({...form,price:e.target.value})} /></div>
-                  <div><label className="label">MANZIL</label><input className="input" placeholder="masalan: Toshkent, Chilonzor" value={form.location} onChange={e => setForm({...form,location:e.target.value})} /></div>
-                  <button className="btn btn-orange" style={{ padding:14 }} onClick={handlePost}>✅ E'lon qilish</button>
-                </div>
-              </>
-            )}
-
-            {/* DEAL */}
-            {modal?.type === "deal" && (
-              <>
-                {!dealDone ? (
-                  <>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
-                      <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800 }}>Deal qilish</div>
-                      <button onClick={() => setModal(null)} style={{ background:"#1e1e1e", border:"none", borderRadius:10, width:36, height:36, color:"#fff", cursor:"pointer", fontSize:16 }}>✕</button>
-                    </div>
-                    <div style={{ textAlign:"center", padding:"16px 0 24px" }}>
-                      <div style={{ fontSize:56, marginBottom:12 }}>{modal.worker.emoji}</div>
-                      <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800 }}>{modal.worker.name}</div>
-                      <div style={{ color:modal.worker.color, fontWeight:600, marginBottom:20 }}>{modal.worker.specialty}</div>
-                      <div style={{ background:"#1a1a1a", border:"1px solid #252525", borderRadius:14, padding:16, textAlign:"left", marginBottom:20 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
-                          <span style={{ color:"#666" }}>Narx:</span><span style={{ color:"#FFB703", fontWeight:700 }}>{modal.worker.price} so'mdan</span>
-                        </div>
-                        <div style={{ display:"flex", justifyContent:"space-between" }}>
-                          <span style={{ color:"#666" }}>Reyting:</span><span style={{ color:"#FFB703", fontWeight:700 }}>⭐ {modal.worker.rating} ({modal.worker.reviews} izoh)</span>
-                        </div>
-                      </div>
-                      <textarea className="input" rows={3} placeholder="Muammoni tushuntiring... (masalan: vannaxonamda kran tomchilayapti)" value={dealMessage} onChange={e => setDealMessage(e.target.value)} style={{ marginBottom:16, resize:"none" }} />
-                      <button className="btn btn-orange" style={{ width:"100%", padding:14, fontSize:15 }} onClick={() => confirmDeal(modal.worker)}>
-                        🤝 Tasdiqlash — Deal!
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="pop" style={{ textAlign:"center", padding:"40px 0" }}>
-                    <div style={{ fontSize:72, marginBottom:16 }}>🤝</div>
-                    <div style={{ fontFamily:"'Syne',sans-serif", fontSize:28, fontWeight:800, marginBottom:8 }}>Deal qilindi!</div>
-                    <div style={{ color:"#06D6A0", fontSize:15 }}>{modal.worker.name} bilan bog'landingiz</div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const SERVICE_PAGES = {
+  '/santexnik-chaqirish': {
+    kind: 'service',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    title: 'Toshkentda santexnik chaqirish',
+    description:
+      'Kran oqishi, quvur yorilishi, unitaz nosozligi yoki suv bosimi muammosi uchun tezkor santexnik xizmati.',
+    intro:
+      'UstaFix Toshkent bo‘ylab santexnik chaqirish uchun SEO sahifa. Birgina murojaat bilan sizga mos ustaga ulanish mumkin.',
+    bullets: [
+      'Kran va quvur ta’miri',
+      'Unitaz, sifon va rakovina o‘rnatish',
+      'Suv bosimi va sizib chiqish muammolari',
+      'Shoshilinch uyga chiqish',
+    ],
+    faq: [
+      ['Santexnik qancha vaqtda keladi?', 'Odatda murojaatdan so‘ng tezkor bog‘lanish qilinadi.'],
+      ['Narx qanday hisoblanadi?', 'Ish hajmi va joylashuvga qarab kelishiladi.'],
+      ['Kichik ishlar ham qilinadimi?', 'Ha, kran almashtirishdan tortib katta quvur ishlarigacha.'],
+    ],
+    serviceTags: ['kran ta’miri', 'quvur ta’miri', 'unitaz o‘rnatish'],
+  },
+  '/elektrik-chaqirish': {
+    kind: 'service',
+    service: 'Elektrik',
+    city: 'Toshkent',
+    title: 'Toshkentda elektrik chaqirish',
+    description:
+      'Rozetka, svet, avtomat, sim tortish yoki qisqa tutashuv muammolari uchun xavfsiz elektrik xizmati.',
+    intro:
+      'Elektrik qidirayotgan mijozlar uchun tayyorlangan sahifa. Sahifa Google’da elektr ta’miri bo‘yicha qidiruvlarga mos yozuv bilan qurilgan.',
+    bullets: [
+      'Rozetka va svet muammolari',
+      'Avtomat va elektr shkaf ishlari',
+      'Sim tortish va ulash',
+      'Uy va ofis uchun tezkor yordam',
+    ],
+    faq: [
+      ['Elektrik kechasi ham keladimi?', 'Bu siz tanlagan ustaga bog‘liq, lekin tez bog‘lanish uchun forma bor.'],
+      ['Xavfsizlik qanday ta’minlanadi?', 'Ish oldidan muammo aniqlanib, keyin bajariladi.'],
+      ['Mayda ishlar uchun ham murojaat qilsa bo‘ladimi?', 'Ha, rozetka almashtirish kabi ishlar ham qabul qilinadi.'],
+    ],
+    serviceTags: ['rozetka', 'svet', 'elektr shkaf'],
+  },
+  '/konditsioner-tamiri': {
+    kind: 'service',
+    service: 'Konditsioner',
+    city: 'Toshkent',
+    title: 'Toshkentda konditsioner ta’miri',
+    description:
+      'Konditsioner sovitmayapti, shovqin chiqaryapti yoki gaz to‘ldirish kerak bo‘lsa, mos usta toping.',
+    intro:
+      'Yozgi mavsumda eng ko‘p qidiriladigan xizmatlardan biri. Biz uni tez topiladigan, qisqa va tushunarli sahifaga aylantirdik.',
+    bullets: [
+      'Diagnostika va tozalash',
+      'Gaz to‘ldirish va servis',
+      'O‘rnatish va ko‘chirish',
+      'Sovutish muammosini topish',
+    ],
+    faq: [
+      ['Gaz to‘ldirish alohidami?', 'Ha, muammo turiga qarab servis alohida baholanadi.'],
+      ['Qaysi turdagi konditsionerlar?', 'Uy va ofisdagi ko‘p tarqalgan tizimlar.'],
+      ['Murojaatni qanday yuboraman?', 'Pastdagi forma orqali ism, telefon va muammo yozasiz.'],
+    ],
+    serviceTags: ['gaz to‘ldirish', 'servis', 'o‘rnatish'],
+  },
+  '/toshkent': {
+    kind: 'city',
+    city: 'Toshkent',
+    title: 'Toshkentda uy ta’miri xizmatlari',
+    description:
+      'Toshkent bo‘ylab santexnik, elektrik va konditsioner ustalariga tez murojaat qilish uchun sahifa.',
+    intro:
+      'Toshkent uchun local SEO sahifa. Maqsad oddiy: odam Google’dan topsin, tez o‘qisin va bir klikda bog‘lansin.',
+    bullets: [
+      'Chilonzor, Yunusobod, Yakkasaroy va boshqa hududlar',
+      'Uy, ofis va xonadonlar uchun ustalar',
+      'Qo‘ng‘iroq yoki forma orqali lead qoldirish',
+      'Tez bog‘lanish va kelishilgan narx',
+    ],
+    faq: [
+      ['Toshkentdan tashqarida ham ishlaysizmi?', 'Ha, keyin Samarqand va Farg‘ona sahifalari qo‘shiladi.'],
+      ['Ustani qanday tanlayman?', 'Siz muammoni yozasiz, keyin mos yo‘nalishga ulanamiz.'],
+      ['Sayt qidiruvda chiqadimi?', 'Ha, shu pivotsiz maqsadimiz aynan shunday: SEO orqali kelish.'],
+    ],
+    serviceTags: ['Chilonzor', 'Yunusobod', 'Yakkasaroy'],
+  },
+  '/kontakt': {
+    kind: 'contact',
+    title: 'UstaFix bilan bog‘lanish',
+    description:
+      'Telefon, Telegram yoki WhatsApp orqali tez bog‘laning yoki pastdagi formani to‘ldiring.',
+    intro:
+      'Bu sahifa call-first konversiya uchun. Google’dan kelgan foydalanuvchi eng qisqa yo‘l bilan bog‘lanadi.',
+    bullets: [
+      'Telefon orqali tez aloqa',
+      'Telegram orqali xabar qoldirish',
+      'WhatsApp orqali yozish',
+      'Formadan lead qoldirish',
+    ],
+    faq: [
+      ['Qaysi kanal tezroq?', 'Telefon eng tez, Telegram va WhatsApp keyingi qulay variantlar.'],
+      ['Forma qayerga boradi?', 'Firestore `requests` collection’iga yoziladi.'],
+      ['Javob qachon keladi?', 'Tizim leadni saqlaydi va admin ko‘rib chiqadi.'],
+    ],
+    serviceTags: ['qo‘ng‘iroq', 'Telegram', 'WhatsApp'],
+  },
 }
 
-function WorkerCard({ w, liked, dealed, onLike, onDeal }) {
+const DEFAULT_WORKERS = [
+  {
+    id: 'worker-1',
+    name: 'Azizbek Usta',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    area: 'Chilonzor',
+    phone: '+998901112233',
+    telegram: 'https://t.me/azizbek_usta',
+    whatsapp: 'https://wa.me/998901112233',
+    rating: 4.9,
+    reviews: 86,
+    available: true,
+    skills: ['quvur ta’miri', 'kran almashtirish', 'unitaz o‘rnatish'],
+    bio: 'Tezkor chiqish va mayda-katta santexnik ishlar uchun qulay usta.',
+  },
+  {
+    id: 'worker-1b',
+    name: 'Bahrom Santexnik',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    area: 'Yashnobod',
+    phone: '+998901113355',
+    telegram: 'https://t.me/bahrom_santexnik',
+    whatsapp: 'https://wa.me/998901113355',
+    rating: 4.8,
+    reviews: 61,
+    available: true,
+    skills: ['kran ta’miri', 'suv sizishi', 'quvur ulash'],
+    bio: 'Yashnobod va atrofida tez chiqib, kran va quvur muammolarini ko‘p yopadi.',
+  },
+  {
+    id: 'worker-2',
+    name: 'Dilshod Elektrik',
+    service: 'Elektrik',
+    city: 'Toshkent',
+    area: 'Yunusobod',
+    phone: '+998901445566',
+    telegram: 'https://t.me/dilshod_elektrik',
+    whatsapp: 'https://wa.me/998901445566',
+    rating: 4.8,
+    reviews: 74,
+    available: true,
+    skills: ['rozetka', 'svet', 'avtomat'],
+    bio: 'Uy va ofisda elektr muammolarini tez topib, xavfsiz yechim beradi.',
+  },
+  {
+    id: 'worker-2b',
+    name: 'Bekzod Elektrik',
+    service: 'Elektrik',
+    city: 'Toshkent',
+    area: 'Chilonzor',
+    phone: '+998901223344',
+    telegram: 'https://t.me/bekzod_elektrik',
+    whatsapp: 'https://wa.me/998901223344',
+    rating: 4.7,
+    reviews: 44,
+    available: true,
+    skills: ['sim tortish', 'avtomat', 'qisqa tutashuv'],
+    bio: 'Chilonzor hududida eski sim va avtomat ishlari uchun mos usta.',
+  },
+  {
+    id: 'worker-3',
+    name: 'Jasur Konditsioner',
+    service: 'Konditsioner',
+    city: 'Toshkent',
+    area: 'Yakkasaroy',
+    phone: '+998901778899',
+    telegram: 'https://t.me/jasur_ac',
+    whatsapp: 'https://wa.me/998901778899',
+    rating: 4.9,
+    reviews: 52,
+    available: false,
+    skills: ['servis', 'gaz to‘ldirish', 'o‘rnatish'],
+    bio: 'Mavsumiy yuklama paytida ham qisqa muddatda navbat beradi.',
+  },
+  {
+    id: 'worker-3b',
+    name: 'Anvar AC',
+    service: 'Konditsioner',
+    city: 'Toshkent',
+    area: 'Mirzo Ulug‘bek',
+    phone: '+998901556677',
+    telegram: 'https://t.me/anvar_ac',
+    whatsapp: 'https://wa.me/998901556677',
+    rating: 4.8,
+    reviews: 35,
+    available: true,
+    skills: ['sovutmayapti', 'tozalash', 'gaz tekshirish'],
+    bio: 'Sovutish pasaygan konditsionerlar uchun joyida diagnostika va servis.',
+  },
+  {
+    id: 'worker-4',
+    name: 'Farhod Usta',
+    service: 'Maishiy texnika',
+    city: 'Samarqand',
+    area: 'Markaz',
+    phone: '+998907001122',
+    telegram: 'https://t.me/farhod_tex',
+    whatsapp: 'https://wa.me/998907001122',
+    rating: 4.7,
+    reviews: 39,
+    available: true,
+    skills: ['kir yuvish mashinasi', 'muzlatgich', 'diagnostika'],
+    bio: 'Maishiy texnika nosozligida tashxis va joyida ishlashga mos usta.',
+  },
+  {
+    id: 'worker-4b',
+    name: 'Nodir Texnik',
+    service: 'Maishiy texnika',
+    city: 'Toshkent',
+    area: 'Mirzo Ulug‘bek',
+    phone: '+998907771122',
+    telegram: 'https://t.me/nodir_tex',
+    whatsapp: 'https://wa.me/998907771122',
+    rating: 4.8,
+    reviews: 48,
+    available: true,
+    skills: ['kir mashina', 'nasos', 'diagnostika'],
+    bio: 'Kir mashina remontida joyiga chiqib, tez tashxis qo‘yadigan usta.',
+  },
+  {
+    id: 'worker-5',
+    name: 'Rustam Remont',
+    service: 'Remont',
+    city: 'Toshkent',
+    area: 'Chilonzor',
+    phone: '+998909998877',
+    telegram: 'https://t.me/rustam_remont',
+    whatsapp: 'https://wa.me/998909998877',
+    rating: 4.9,
+    reviews: 57,
+    available: true,
+    skills: ['uy remont', 'oshxona', 'hammom'],
+    bio: 'Xonadon va kichik uy remontini bosqichma-bosqich rejalab bajaradigan brigada.',
+  },
+  {
+    id: 'worker-6',
+    name: 'Madina Dizayn',
+    service: 'Dizayn',
+    city: 'Toshkent',
+    area: 'Yakkasaroy',
+    phone: '+998909887766',
+    telegram: 'https://t.me/madina_dizayn',
+    whatsapp: 'https://wa.me/998909887766',
+    rating: 4.8,
+    reviews: 33,
+    available: true,
+    skills: ['hammom dizayn', 'oshxona reja', 'material tanlash'],
+    bio: 'Hammom va oshxona yangilashda dizayn, smeta va usta tanlashni birga olib boradi.',
+  },
+]
+
+const HOME_PAGE = {
+  kind: 'home',
+  title: 'UstaFix - ustalar topish va bog‘lanish platformasi',
+  description:
+    'UstaFix - O‘zbekistonda ustalarni Google qidiruvida topish, xizmat bo‘yicha filtrlash va tez bog‘lanish uchun SEO-first platforma.',
+  intro:
+    'Maqsad oddiy: odam Google’dan xizmatni topsin, ustalar ro‘yxatini ko‘rsin va bir klikda bog‘lansin. Public sahifa SEO uchun yozilgan, ichki oqim esa lead va kontaktga olib boradi.',
+  bullets: [
+    'Santexnik, elektrik, konditsioner va boshqa ustalar',
+    'Telefon, Telegram va WhatsApp orqali kontakt',
+    'Firestore lead capture',
+    'Toshkent uchun local SEO',
+  ],
+  serviceTags: ['usta topish', 'local SEO', 'lead generation'],
+  faq: [
+    ['UstaFix nima?', 'Ustalarni topish, filtrlash va ularga tez bog‘lanish uchun platforma.'],
+    ['Mijoz nima qiladi?', 'Xizmatni tanlaydi, ustani ko‘radi va telefon yoki xabar orqali bog‘lanadi.'],
+    ['Nima uchun SEO-first?', 'Chunki asosiy trafik Google qidiruvidan kelishi kerak.'],
+  ],
+}
+
+function makeSeoPage(config) {
+  const service = config.service || 'Santexnik'
+  const city = config.city || 'Toshkent'
+
+  return {
+    kind: 'seo',
+    demandLayer: config.demandLayer || 'emergency',
+    service,
+    city,
+    h1: config.h1,
+    title: config.title,
+    description: config.description,
+    intro: config.intro,
+    explanationTitle: config.explanationTitle || 'Muammo nimadan iborat?',
+    explanation: config.explanation,
+    priceRange: config.priceRange,
+    priceNote: config.priceNote,
+    signalsTitle: config.signalsTitle || 'Nimani ko‘rasiz?',
+    signals: config.signals,
+    faq: config.faq,
+    serviceTags: config.serviceTags,
+    relatedLinks: config.relatedLinks,
+    workerFilter: config.workerFilter || { service, city, area: config.area || '' },
+  }
+}
+
+const PROBLEM_PAGES = {
+  '/kran-oqyapti': makeSeoPage({
+    demandLayer: 'emergency',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    h1: 'Kran oqyapti',
+    title: 'Kran oqyapti? Toshkentda tez santexnik chaqiring | UstaFix',
+    description:
+      'Kran tomchilab oqyaptimi, jo‘mrak yopilganda ham suv chiqyaptimi? Toshkentdagi tezkor santexniklar, taxminiy narx va aloqa variantlari shu sahifada.',
+    intro:
+      'Bu sahifa kichik lekin bezovta qiladigan kran oqishi uchun. Maqsad: foydalanuvchi muammoni tez taniysin, narx oralig‘ini ko‘rsin va bir klikda ustaga chiqsin.',
+    explanationTitle: 'Kran oqishi nimadan bo‘ladi?',
+    explanation:
+      'Odatda rezina prokladka yeyilishi, kartrij eskirishi, armatura bo‘shashishi yoki quvur ulanishida sizib chiqish sabab bo‘ladi. Odam Google’dan aynan shu muammoni qidirganda sahifa qisqa javob va tez aloqa berishi kerak.',
+    priceRange: 'Taxminan 80 000 - 180 000 so‘m',
+    priceNote: 'Oddiy kran ta’miri arzonroq, butun armatura almashtirish esa narxni oshiradi.',
+    signalsTitle: 'Qanday belgilar bo‘ladi?',
+    signals: ['Kran yopiq bo‘lsa ham tomchilaydi', 'Kechasi shovqin qiladi', 'Lavabo tagida namlik ko‘rinadi'],
+    faq: [
+      ['Kran oqsa darhol almashtirish kerakmi?', 'Har doim emas. Ko‘p holatda rezina, kartrij yoki ulanishni tuzatish yetadi.'],
+      ['Usta qancha vaqtda keladi?', 'Hududga qarab tezkor bog‘lanish qilinadi va eng yaqin usta yo‘naltiriladi.'],
+      ['Kichik ish uchun ham chiqish bo‘ladimi?', 'Ha, aynan shu sahifa mayda ammo shoshilinch ishlar uchun yaratilgan.'],
+    ],
+    serviceTags: ['kran oqishi', 'tomchilash', 'santexnik'],
+    relatedLinks: [
+      { href: '/kran-tagidan-suv-oqyapti', label: 'Kran tagidan suv oqyapti', text: 'Ulanish joyidagi sizib chiqish uchun.' },
+      { href: '/santexnik-toshkent', label: 'Santexnik Toshkent', text: 'Hudud bo‘yicha umumiy santexnik sahifa.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Shahar bo‘yicha barcha xizmatlar.' },
+    ],
+  }),
+  '/kran-tagidan-suv-oqyapti': makeSeoPage({
+    demandLayer: 'emergency',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    h1: 'Kran tagidan suv oqyapti',
+    title: 'Kran tagidan suv oqyapti? Sabab va narx | UstaFix',
+    description:
+      'Kran tagidan yoki lavabo ostidan suv oqyaptimi? Bu sahifada siz sabablar, taxminiy narx va tezkor santexniklarga chiqish yo‘lini topasiz.',
+    intro:
+      'Bu sahifa ko‘rinmaydigan, lekin zarar yetkazadigan sizib chiqishlar uchun. Lavabo tagidagi namlik, ho‘l quvur yoki ulanish bo‘shashishi kabi holatlar uchun mos.',
+    explanationTitle: 'Nega kran tagidan suv chiqadi?',
+    explanation:
+      'Ko‘pincha krankaga ulangan shlang bo‘shashadi, fiting qotmaydi, prokladka ishlamay qoladi yoki metall qismdagi mikroyoriq kuchayadi. Muammo erta topilsa, katta ta’mirga o‘tmaydi.',
+    priceRange: 'Taxminan 100 000 - 220 000 so‘m',
+    priceNote: 'Tagidan oqish uchun qo‘shimcha diagnostika kerak bo‘lishi mumkin, chunki suv yo‘li yashirin bo‘ladi.',
+    signalsTitle: 'Qaysi holatlar xavfli?',
+    signals: ['Lavabo ostida suv yig‘iladi', 'Shlang ulanish joyi nam bo‘ladi', 'Kichik oqish vaqt o‘tishi bilan kuchayadi'],
+    faq: [
+      ['Bu faqat kran muammosimi?', 'Yo‘q, ba’zan ulanish yoki quvurdagi muammo bo‘ladi va qo‘shimcha tekshiruv kerak bo‘ladi.'],
+      ['Santexnik kelguncha nima qilish kerak?', 'Asosiy suvni yoping va oqayotgan joyni quritib qo‘ying.'],
+      ['Sahifa nima uchun alohida?', 'Chunki bu qidiruv iborasi boshqacha va foydalanuvchi niyati ham aniqroq.'],
+    ],
+    serviceTags: ['suv sizishi', 'lavabo tagi', 'kran'],
+    relatedLinks: [
+      { href: '/kran-oqyapti', label: 'Kran oqyapti', text: 'Oddiy tomchilash holati uchun.' },
+      { href: '/santexnik-toshkent', label: 'Santexnik Toshkent', text: 'Hududiy xizmat sahifasi.' },
+      { href: '/elektrik-chilonzor', label: 'Elektrik Chilonzor', text: 'Agar suv bilan birga elektr xavfi ham bo‘lsa.' },
+    ],
+  }),
+  '/konditsioner-sovutmayapti': makeSeoPage({
+    demandLayer: 'emergency',
+    service: 'Konditsioner',
+    city: 'Toshkent',
+    h1: 'Konditsioner sovutmayapti',
+    title: 'Konditsioner sovutmayapti? Tez servis va narx | UstaFix',
+    description:
+      'Konditsioner havo aylantiryaptimi, lekin sovutmayaptimi? Sabablar, taxminiy servis narxi va tez topiladigan ustalar bu yerda.',
+    intro:
+      'Bu yozgi mavsumda eng ko‘p qidiriladigan muammolardan biri. Sahifa sovutish pasayishi, gaz kamayishi va tozalash ehtiyojini bir joyda tushuntiradi.',
+    explanationTitle: 'Nega konditsioner sovutmaydi?',
+    explanation:
+      'Gaz kamayishi, filtr va radiator ifloslanishi, ventilyator yoki sensor xatolari, ba’zan esa kompressor bilan bog‘liq muammo sabab bo‘ladi. To‘g‘ri tashxisni tez qo‘yish narxni ham kamaytiradi.',
+    priceRange: 'Taxminan 150 000 - 420 000 so‘m',
+    priceNote: 'Servis narxi tozalash, gaz tekshirish va ehtiyot qismga qarab farq qiladi.',
+    signalsTitle: 'Belgilari qanday?',
+    signals: ['Havo chiqadi, lekin sovuq emas', 'Ichki blok muzlaydi', 'Uzoq vaqt ishlasa ham xona sovimaydi'],
+    faq: [
+      ['Gaz to‘ldirish kerak bo‘lishi mumkinmi?', 'Ha, lekin faqat tekshiruvdan keyin xulosa qilinadi.'],
+      ['Qachon servis qilish kerak?', 'Sovutish pasayishi yoki g‘alati shovqin boshlangan zahoti.'],
+      ['Kechasi ham murojaat bo‘ladimi?', 'Ha, aloqa tugmalari orqali tez bog‘lanish mumkin.'],
+    ],
+    serviceTags: ['konditsioner', 'sovutmayapti', 'servis'],
+    relatedLinks: [
+      { href: '/konditsioner-tamiri', label: 'Konditsioner ta’miri', text: 'Umumiy servis sahifasi.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Hududiy sahifa.' },
+      { href: '/elektrik-chilonzor', label: 'Elektrik Chilonzor', text: 'Agar elektr ta’minoti ham muammo bo‘lsa.' },
+    ],
+  }),
+  '/kir-mashina-remont': makeSeoPage({
+    demandLayer: 'emergency',
+    service: 'Maishiy texnika',
+    city: 'Toshkent',
+    h1: 'Kir mashina remont',
+    title: 'Kir mashina remont kerakmi? Usta va narx | UstaFix',
+    description:
+      'Kir yuvish mashinasi suv olmayaptimi, aylantirmayaptimi yoki xatolik kodini ko‘rsatyaptimi? Usta topish, taxminiy narx va aloqa shu sahifada.',
+    intro:
+      'Bu sahifa kir yuvish mashinasi to‘xtab qolganida paydo bo‘ladigan qidiruv niyatiga mos yozilgan. Odam muammoni ko‘radi, taxminiy narxni tushunadi va ustaga chiqadi.',
+    explanationTitle: 'Kir mashina remontida nimalar tekshiriladi?',
+    explanation:
+      'Nasos, remen, podshipnik, datchiklar, suv kirish valfi va elektron plata alohida ko‘riladi. Muammo mayda bo‘lsa joyida hal qilinadi, murakkab holatda esa diagnostika chuqurlashtiriladi.',
+    priceRange: 'Taxminan 120 000 - 480 000 so‘m',
+    priceNote: 'Oddiy nosozliklar arzon, motor yoki plata bilan bog‘liq ishlar qimmatroq bo‘lishi mumkin.',
+    signalsTitle: 'Nimani sezish mumkin?',
+    signals: ['Suv oladi, lekin aylantirmaydi', 'Shovqin yoki vibratsiya kuchli', 'Ekranda xatolik kodi chiqadi'],
+    faq: [
+      ['Kir mashina joyida tuzatiladimi?', 'Ko‘p holatda ha, lekin ayrim ehtiyot qismga olib ketish kerak bo‘lishi mumkin.'],
+      ['Qaysi brendlar qilinadi?', 'Ommabop maishiy texnika modellari bilan ishlaydigan ustalar bor.'],
+      ['Qancha vaqt ketadi?', 'Nosozlik turiga bog‘liq, lekin avval diagnostika qilinadi.'],
+    ],
+    serviceTags: ['kir mashina', 'remont', 'maishiy texnika'],
+    relatedLinks: [
+      { href: '/santexnik-toshkent', label: 'Santexnik Toshkent', text: 'Uy ichidagi boshqa ta’mirlar uchun.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Hududiy qidiruv sahifasi.' },
+      { href: '/kran-oqyapti', label: 'Kran oqyapti', text: 'Agar suv tizimi ham muammo bo‘lsa.' },
+    ],
+  }),
+  '/santexnik-toshkent': makeSeoPage({
+    demandLayer: 'emergency',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    h1: 'Toshkentda santexnik',
+    title: 'Santexnik Toshkent: tez usta va narx | UstaFix',
+    description:
+      'Toshkentda santexnik kerakmi? Kran, quvur, lavabo, unitaz va suv tizimi bo‘yicha ustalar, taxminiy narxlar va bog‘lanish yo‘llari.',
+    intro:
+      'Bu sahifa umumiy santexnik qidiruvi uchun. Foydalanuvchi muammoni hali aniq bilmasa ham, nimaga ulanishni tez topadi.',
+    explanationTitle: 'Santexnik xizmatlar qachon kerak bo‘ladi?',
+    explanation:
+      'Kran tomchilashidan tortib, quvur yorilishi, lavabo o‘rnatish, unitaz ta’miri va suv bosimi pasayishi kabi holatlar uchun ishlatiladi. Toshkent bo‘yicha tez bog‘lanish eng muhim omil bo‘ladi.',
+    priceRange: 'Taxminan 90 000 - 350 000 so‘m',
+    priceNote: 'Ish hajmi va hududga qarab ustaning chiqish narxi o‘zgaradi.',
+    signalsTitle: 'Qanday ishlar ko‘p uchraydi?',
+    signals: ['Kichik sizib chiqish', 'Lavabo va unitaz montaji', 'Suv bosimi va kollektor muammolari'],
+    faq: [
+      ['Toshkent bo‘ylab chiqasizmi?', 'Ha, sahifa aynan shahar bo‘yicha qidiruv uchun mo‘ljallangan.'],
+      ['Kichik ishlar qabul qilinadimi?', 'Ha, mayda ishlardan boshlanib katta loyihagacha borishi mumkin.'],
+      ['Narx oldindan aytiladimi?', 'Taxminiy oraliq beriladi, aniq baho ishni ko‘rgandan keyin aytiladi.'],
+    ],
+    serviceTags: ['santexnik', 'Toshkent', 'quvur'],
+    relatedLinks: [
+      { href: '/kran-oqyapti', label: 'Kran oqyapti', text: 'Eng ko‘p qidiriladigan muammo.' },
+      { href: '/kran-tagidan-suv-oqyapti', label: 'Kran tagidan suv oqyapti', text: 'Yashirin sizib chiqish uchun.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Hudud bo‘yicha umumiy sahifa.' },
+    ],
+  }),
+  '/elektrik-chilonzor': makeSeoPage({
+    demandLayer: 'emergency',
+    service: 'Elektrik',
+    city: 'Toshkent',
+    area: 'Chilonzor',
+    h1: 'Chilonzorda elektrik',
+    title: 'Elektrik Chilonzor: uyga chiqish va narx | UstaFix',
+    description:
+      'Chilonzorda elektrik kerakmi? Rozetka, svet, avtomat, sim tortish va eski elektr muammolari uchun ustalar shu sahifada.',
+    intro:
+      'Bu sahifa Chilonzor bo‘yicha lokal intent uchun. Foydalanuvchi aniq hudud yozadi, shuning uchun javob ham hududga mos bo‘lishi kerak.',
+    explanationTitle: 'Elektrik qachon kerak bo‘ladi?',
+    explanation:
+      'Rozetka ishlamay qolsa, avtomat o‘chsa, sim qizisa, svet o‘chib-yonib tursa yoki eski uyda qo‘shimcha liniya kerak bo‘lsa elektrik kerak bo‘ladi. Chilonzor kabi katta hududlarda tez chiqish va hududiy moslik muhim.',
+    priceRange: 'Taxminan 70 000 - 260 000 so‘m',
+    priceNote: 'Oddiy rozetka va svet ishlari arzonroq, avtomat va sim tortish qimmatroq bo‘ladi.',
+    signalsTitle: 'Qanday alomatlar bor?',
+    signals: ['Avtomat tez-tez o‘chadi', 'Rozetkada uchqun bo‘ladi', 'Svet ishlamay qoladi yoki miltillaydi'],
+    faq: [
+      ['Chilonzorga tez chiqiladimi?', 'Ha, sahifa aynan shu hudud qidiruvlari uchun optimallashtirilgan.'],
+      ['Eski uy elektri ham qilinadimi?', 'Ha, lekin xavfsizlik tekshiruvi birinchi o‘rinda bo‘ladi.'],
+      ['Kichik ishlar ham qabul qilinadimi?', 'Albatta, rozetka almashtirish ham shu sahifaga mos.'],
+    ],
+    serviceTags: ['elektrik', 'Chilonzor', 'rozetka'],
+    relatedLinks: [
+      { href: '/kran-oqyapti', label: 'Kran oqyapti', text: 'Uy ichidagi boshqa muammolar uchun.' },
+      { href: '/santexnik-toshkent', label: 'Santexnik Toshkent', text: 'Agar suv va elektr birga muammo bo‘lsa.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Shahar bo‘yicha boshqa xizmatlar.' },
+    ],
+  }),
+}
+
+const MAINTENANCE_PAGES = {
+  '/kran-almashtirish': makeSeoPage({
+    demandLayer: 'maintenance',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    h1: 'Kran almashtirish',
+    title: 'Kran almashtirish xizmati: usta va narx | UstaFix',
+    description:
+      'Eski kranni yangisiga almashtirish, lavabo yoki oshxona kranini o‘rnatish uchun santexniklar, narx oralig‘i va tez aloqa.',
+    intro:
+      'Bu sahifa favqulodda oqishdan ko‘ra rejali almashtirish intenti uchun. Foydalanuvchi yangi kran olgan yoki eskisini almashtirmoqchi bo‘lgan paytda kerakli ustani tez topadi.',
+    explanationTitle: 'Kran almashtirishda nima qilinadi?',
+    explanation:
+      'Usta eski kranni yechadi, ulanish joylarini tekshiradi, yangi kranni o‘rnatadi va sizib chiqish bor-yo‘qligini sinaydi. Oshxona va hammom kranlari uchun ish tartibi biroz farq qiladi.',
+    priceRange: 'Taxminan 100 000 - 250 000 so‘m',
+    priceNote: 'Narx kran turi, shlanglar holati va qo‘shimcha moslama kerakligiga qarab o‘zgaradi.',
+    signalsTitle: 'Qachon almashtirish yaxshi?',
+    signals: ['Kran zanglagan yoki qattiq buriladi', 'Yangi rakovina yoki mebel qo‘yildi', 'Ta’mirdan keyin bir xil uslub kerak'],
+    faq: [
+      ['Yangi kranni usta olib keladimi?', 'Kelishuvga qarab, mijoz o‘zi olishi yoki usta tavsiya berishi mumkin.'],
+      ['Eski shlanglar ham almashtiriladimi?', 'Agar eskirgan bo‘lsa, xavfsizlik uchun almashtirish tavsiya qilinadi.'],
+      ['Ish qancha vaqt oladi?', 'Oddiy holatda 30-90 daqiqa atrofida bo‘ladi.'],
+    ],
+    serviceTags: ['kran almashtirish', 'santexnik', 'lavabo'],
+    relatedLinks: [
+      { href: '/kran-oqyapti', label: 'Kran oqyapti', text: 'Agar almashtirishdan oldin oqish boshlangan bo‘lsa.' },
+      { href: '/santexnika-tekshiruv', label: 'Santexnika tekshiruv', text: 'Butun tizimni oldindan ko‘rish uchun.' },
+      { href: '/santexnik-toshkent', label: 'Santexnik Toshkent', text: 'Shahar bo‘yicha ustalar.' },
+    ],
+  }),
+  '/elektrik-ornatish': makeSeoPage({
+    demandLayer: 'maintenance',
+    service: 'Elektrik',
+    city: 'Toshkent',
+    h1: 'Elektrik o‘rnatish ishlari',
+    title: 'Elektrik o‘rnatish: rozetka, svet, avtomat | UstaFix',
+    description:
+      'Rozetka, chiroq, avtomat yoki kichik elektr nuqtalarini o‘rnatish uchun Toshkentdagi elektrik ustalar va taxminiy narxlar.',
+    intro:
+      'Bu sahifa buzilish emas, rejali o‘rnatish ishlarini qidirayotgan mijoz uchun. Yangi texnika, yoritish yoki uy tartibini o‘zgartirishda qo‘l keladi.',
+    explanationTitle: 'Elektrik o‘rnatishda nimalar kiradi?',
+    explanation:
+      'Usta nuqta joyini ko‘radi, yuklama xavfsizligini tekshiradi, kerak bo‘lsa avtomat yoki kabel mosligini baholaydi va o‘rnatishdan keyin sinov qiladi.',
+    priceRange: 'Taxminan 80 000 - 300 000 so‘m',
+    priceNote: 'Bitta rozetka arzonroq, yangi kabel tortish yoki avtomat qo‘yish narxni oshiradi.',
+    signalsTitle: 'Qanday holatlar uchun mos?',
+    signals: ['Yangi chiroq yoki bra o‘rnatish', 'Texnika uchun alohida rozetka kerak', 'Avtomat va liniya yangilanadi'],
+    faq: [
+      ['Materialni kim oladi?', 'Mayda materialni usta tavsiya qiladi yoki kelishuvga qarab olib keladi.'],
+      ['Eski uyda ham qilish mumkinmi?', 'Ha, lekin avval yuklama va sim holati tekshiriladi.'],
+      ['Bir nechta nuqta bir kunda qilinadimi?', 'Ko‘p holatda ha, ish hajmiga qarab vaqt belgilanadi.'],
+    ],
+    serviceTags: ['elektr o‘rnatish', 'rozetka', 'svet'],
+    relatedLinks: [
+      { href: '/yangi-rozetka-ornatish', label: 'Yangi rozetka o‘rnatish', text: 'Aniq rozetka intenti uchun.' },
+      { href: '/elektrik-chilonzor', label: 'Elektrik Chilonzor', text: 'Hududiy qidiruv sahifasi.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Boshqa xizmatlarni ko‘rish.' },
+    ],
+  }),
+  '/konditsioner-servis': makeSeoPage({
+    demandLayer: 'maintenance',
+    service: 'Konditsioner',
+    city: 'Toshkent',
+    h1: 'Konditsioner servis',
+    title: 'Konditsioner servis: tozalash, gaz tekshiruv, narx | UstaFix',
+    description:
+      'Konditsioner servis qilish, filtr tozalash, gaz bosimini tekshirish va mavsumga tayyorlash uchun ustalar va narx oralig‘i.',
+    intro:
+      'Bu sahifa mavsum oldidan profilaktika qidirayotgan foydalanuvchilar uchun. Maqsad konditsioner buzilmasidan oldin servisga lead olish.',
+    explanationTitle: 'Servis vaqtida nima tekshiriladi?',
+    explanation:
+      'Filtrlar, radiator, drenaj yo‘li, tashqi blok holati, gaz bosimi va sovutish sifati ko‘riladi. Muntazam servis konditsionerning sovutishini yaxshilaydi va elektr sarfini kamaytiradi.',
+    priceRange: 'Taxminan 120 000 - 350 000 so‘m',
+    priceNote: 'Tozalash, gaz tekshirish va tashqi blokka chiqish sharoiti narxga ta’sir qiladi.',
+    signalsTitle: 'Qachon servis kerak?',
+    signals: ['Mavsum boshlanishidan oldin', 'Havo oqimi sustlashgan', 'Ichki blokdan hid keladi'],
+    faq: [
+      ['Har yili servis kerakmi?', 'Ko‘p ishlatiladigan konditsionerlar uchun yiliga bir marta tavsiya qilinadi.'],
+      ['Gaz albatta to‘ldiriladimi?', 'Yo‘q, avval bosim tekshiriladi. Kerak bo‘lsa to‘ldiriladi.'],
+      ['Servis qancha davom etadi?', 'Oddiy holatda 40-90 daqiqa atrofida.'],
+    ],
+    serviceTags: ['konditsioner servis', 'tozalash', 'gaz tekshirish'],
+    relatedLinks: [
+      { href: '/konditsioner-sovutmayapti', label: 'Konditsioner sovutmayapti', text: 'Agar muammo allaqachon boshlangan bo‘lsa.' },
+      { href: '/konditsioner-tamiri', label: 'Konditsioner ta’miri', text: 'Ta’mir va diagnostika sahifasi.' },
+      { href: '/toshkent', label: 'Toshkent xizmatlari', text: 'Shahar bo‘yicha xizmatlar.' },
+    ],
+  }),
+  '/uy-remont': makeSeoPage({
+    demandLayer: 'maintenance',
+    service: 'Remont',
+    city: 'Toshkent',
+    h1: 'Uy remont',
+    title: 'Uy remont: ustalar, brigada va smeta | UstaFix',
+    description:
+      'Uy remont qilish uchun ustalar, brigada tanlash, ish bosqichlari, taxminiy narx va UstaFix orqali tez bog‘lanish.',
+    intro:
+      'Bu sahifa kichik ta’mirdan o‘rta hajmdagi uy remontigacha bo‘lgan talabni ushlaydi. Foydalanuvchi hali aniq ustani emas, umumiy yechimni qidirayotgan bo‘ladi.',
+    explanationTitle: 'Uy remonti qanday rejalashtiriladi?',
+    explanation:
+      'Avval ish hajmi, xonalar soni, material darajasi va muddat aniqlanadi. Keyin santexnik, elektrik, pardoz va yakuniy ishlarga bo‘linadi.',
+    priceRange: 'Taxminan 150 000 - 900 000 so‘m/m²',
+    priceNote: 'Kosmetik remont arzonroq, kapital remont va material sifati narxni keskin o‘zgartiradi.',
+    signalsTitle: 'Qaysi ishlar kiradi?',
+    signals: ['Devor va pol yangilash', 'Elektr va santexnika nuqtalarini ko‘rish', 'Xonalar bo‘yicha smeta tuzish'],
+    faq: [
+      ['Smeta oldindan tuziladimi?', 'Ha, ish hajmi ko‘rilgandan keyin bosqichma-bosqich smeta qilinadi.'],
+      ['Bitta xonadan boshlash mumkinmi?', 'Ha, kichik hajmdan boshlash mumkin.'],
+      ['Materialni kim tanlaydi?', 'Mijoz tanlaydi, usta yoki dizayner texnik tavsiya beradi.'],
+    ],
+    serviceTags: ['uy remont', 'brigada', 'smeta'],
+    relatedLinks: [
+      { href: '/uy-ta’mirlash', label: 'Uy ta’mirlash', text: 'Upgrade va yaxshilash intenti uchun.' },
+      { href: '/oshxona-remont', label: 'Oshxona remont', text: 'Oshxona alohida loyiha bo‘lsa.' },
+      { href: '/hammom-dizayn', label: 'Hammom dizayn', text: 'Hammomni yangilash rejalari uchun.' },
+    ],
+  }),
+  '/santexnika-tekshiruv': makeSeoPage({
+    demandLayer: 'maintenance',
+    service: 'Santexnik',
+    city: 'Toshkent',
+    h1: 'Santexnika tekshiruv',
+    title: 'Santexnika tekshiruv: quvur, kran, sizib chiqish | UstaFix',
+    description:
+      'Uy yoki kvartirada santexnika tekshiruvi: quvur, kran, sifon, suv bosimi va yashirin sizib chiqishlarni oldindan ko‘rish.',
+    intro:
+      'Bu sahifa profilaktika va uy sotib olishdan oldingi tekshiruv kabi rejalangan talabni ushlaydi. Maqsad muammo chiqmasidan oldin ustaga murojaat qilish.',
+    explanationTitle: 'Tekshiruvda nimalar ko‘riladi?',
+    explanation:
+      'Kranlar, sifonlar, quvur ulanishlari, suv bosimi, unitaz mexanizmi va namlik belgisi ko‘riladi. Yashirin sizib chiqishlar erta aniqlansa, katta zarar oldi olinadi.',
+    priceRange: 'Taxminan 100 000 - 300 000 so‘m',
+    priceNote: 'Tekshiruv hajmi xonalar soni va tizim murakkabligiga bog‘liq.',
+    signalsTitle: 'Qachon foydali?',
+    signals: ['Yangi uyga ko‘chishdan oldin', 'Ta’mirdan keyin qabul qilishda', 'Pastki qavatga suv o‘tish xavfi bo‘lsa'],
+    faq: [
+      ['Tekshiruvdan keyin ta’mir ham qilinadimi?', 'Ha, topilgan mayda muammolar kelishuv bilan joyida tuzatilishi mumkin.'],
+      ['Yashirin oqishni aniq bilsa bo‘ladimi?', 'Ko‘rinarli belgilar tekshiriladi, murakkab holatda qo‘shimcha diagnostika kerak bo‘ladi.'],
+      ['Bu xizmat kimga kerak?', 'Uy egasi, ijarachi yoki yangi kvartira olayotgan odamga.'],
+    ],
+    serviceTags: ['santexnika tekshiruv', 'profilaktika', 'quvur'],
+    relatedLinks: [
+      { href: '/kran-tagidan-suv-oqyapti', label: 'Kran tagidan suv oqyapti', text: 'Topilgan sizib chiqish holati uchun.' },
+      { href: '/kran-almashtirish', label: 'Kran almashtirish', text: 'Eskirgan kranni yangilash.' },
+      { href: '/santexnik-toshkent', label: 'Santexnik Toshkent', text: 'Umumiy santexnik sahifa.' },
+    ],
+  }),
+}
+
+const UPGRADE_PAGES = {
+  '/uy-ta’mirlash': makeSeoPage({
+    demandLayer: 'upgrade',
+    service: 'Remont',
+    city: 'Toshkent',
+    h1: 'Uy ta’mirlash',
+    title: 'Uy ta’mirlash: reja, ustalar va narx | UstaFix',
+    description:
+      'Uy ta’mirlashni boshlash uchun ustalar, dizayn yondashuvi, smeta, taxminiy narx va bog‘lanish tugmalari.',
+    intro:
+      'Bu sahifa yaxshilash va yangilash niyatini ushlaydi. Foydalanuvchi buzilgan narsani tuzatishdan ko‘ra, yashash sifatini oshirishni xohlaydi.',
+    explanationTitle: 'Uy ta’mirlash nimadan boshlanadi?',
+    explanation:
+      'Avval maqsad aniqlanadi: kosmetik yangilashmi, xonalarni qayta taqsimlashmi yoki to‘liq kapital ta’mirmi. Shundan keyin ustalar, materiallar va muddat rejalashtiriladi.',
+    priceRange: 'Taxminan 180 000 - 1 200 000 so‘m/m²',
+    priceNote: 'Dizayn, demontaj, material va muhandislik ishlari narxni belgilaydi.',
+    signalsTitle: 'Qanday upgrade ishlari bo‘ladi?',
+    signals: ['Interyer ko‘rinishini yangilash', 'Elektr va suv nuqtalarini qayta joylash', 'Material va ranglarni tanlash'],
+    faq: [
+      ['Uy ta’mirlash va uy remont farqi nimada?', 'Ta’mirlash ko‘proq yaxshilash va rejalashga, remont esa bajariladigan ish hajmiga urg‘u beradi.'],
+      ['Dizayn kerakmi?', 'Katta o‘zgarishlarda dizayn va smeta xatoni kamaytiradi.'],
+      ['Bosqichma-bosqich qilish mumkinmi?', 'Ha, xonalar bo‘yicha navbat bilan qilish mumkin.'],
+    ],
+    serviceTags: ['uy ta’mirlash', 'upgrade', 'interyer'],
+    relatedLinks: [
+      { href: '/uy-remont', label: 'Uy remont', text: 'Remont ishlari va brigada uchun.' },
+      { href: '/oshxona-remont', label: 'Oshxona remont', text: 'Eng ko‘p upgrade qilinadigan xona.' },
+      { href: '/hammom-dizayn', label: 'Hammom dizayn', text: 'Nam zona dizayni uchun.' },
+    ],
+  }),
+  '/oshxona-remont': makeSeoPage({
+    demandLayer: 'upgrade',
+    service: 'Remont',
+    city: 'Toshkent',
+    h1: 'Oshxona remont',
+    title: 'Oshxona remont: mebel, plitka, elektr va santexnika | UstaFix',
+    description:
+      'Oshxona remont qilish uchun ustalar, santexnika va elektr nuqtalari, plitka, mebelga tayyorlash va taxminiy narxlar.',
+    intro:
+      'Oshxona remonti oddiy devor bo‘yashdan ko‘ra murakkabroq: suv, elektr, mebel o‘lchami va pardoz bir-biriga bog‘langan. Bu sahifa shu niyatni alohida ushlaydi.',
+    explanationTitle: 'Oshxona remontida nimalar muhim?',
+    explanation:
+      'Rakvina joyi, rozetkalar soni, gaz yoki elektr plita, yoritish, plitka va mebel o‘lchami oldindan kelishiladi. Rejasiz ish keyin qayta buzishga olib kelishi mumkin.',
+    priceRange: 'Taxminan 2 500 000 - 18 000 000 so‘m',
+    priceNote: 'Narx oshxona maydoni, plitka, elektr nuqtalari va mebelga tayyorlash hajmiga bog‘liq.',
+    signalsTitle: 'Oshxona upgrade belgilari',
+    signals: ['Rozetka yetishmaydi', 'Eski plitka va rakvina noqulay', 'Mebel o‘lchami bilan kommunikatsiya mos emas'],
+    faq: [
+      ['Avval mebelmi yoki remontmi?', 'Odatda mebel rejasini oldin bilish kerak, keyin elektr va suv nuqtalari qo‘yiladi.'],
+      ['Santexnik va elektrik birga kerak bo‘ladimi?', 'Ha, oshxona remontida ikkala yo‘nalish ham ko‘p uchraydi.'],
+      ['Kichik oshxona ham qilinadimi?', 'Ha, kichik maydonda reja yanada muhim bo‘ladi.'],
+    ],
+    serviceTags: ['oshxona remont', 'plitka', 'mebel'],
+    relatedLinks: [
+      { href: '/yangi-rozetka-ornatish', label: 'Yangi rozetka o‘rnatish', text: 'Oshxona texnikasi uchun alohida nuqta.' },
+      { href: '/kran-almashtirish', label: 'Kran almashtirish', text: 'Rakvina va kran yangilash uchun.' },
+      { href: '/uy-ta’mirlash', label: 'Uy ta’mirlash', text: 'Kengroq upgrade rejasi.' },
+    ],
+  }),
+  '/hammom-dizayn': makeSeoPage({
+    demandLayer: 'upgrade',
+    service: 'Dizayn',
+    city: 'Toshkent',
+    h1: 'Hammom dizayn',
+    title: 'Hammom dizayn va remont: reja, narx, ustalar | UstaFix',
+    description:
+      'Hammom dizayn qilish, plitka, santexnika joylashuvi, dush zona va ta’mir ustalarini topish uchun UstaFix sahifasi.',
+    intro:
+      'Hammom upgrade talabi dizayn, santexnika va namlik xavfini birlashtiradi. Shu sababli sahifa faqat remont emas, reja va joylashuvga ham javob beradi.',
+    explanationTitle: 'Hammom dizaynida nimalar hisobga olinadi?',
+    explanation:
+      'Dush yoki vanna joyi, unitaz, rakovina, shamollatish, gidroizolyatsiya va plitka o‘lchami oldindan ko‘riladi. Noto‘g‘ri reja keyin sizib chiqish va noqulaylik keltiradi.',
+    priceRange: 'Taxminan 3 000 000 - 25 000 000 so‘m',
+    priceNote: 'Maydon, plitka darajasi, santexnika brendi va gidroizolyatsiya narxga katta ta’sir qiladi.',
+    signalsTitle: 'Qachon dizayn kerak?',
+    signals: ['Hammom juda tor yoki noqulay', 'Santexnika joyini o‘zgartirish rejalanyapti', 'Plitka va rang bo‘yicha qaror qiyin'],
+    faq: [
+      ['Dizayn alohida, remont alohidami?', 'Kelishuvga qarab alohida reja yoki to‘liq bajarish mumkin.'],
+      ['Gidroizolyatsiya majburiymi?', 'Hammomda juda tavsiya qilinadi, chunki suv xavfi yuqori.'],
+      ['Kichik hammomga ham dizayn kerakmi?', 'Ha, kichik joyda har santimetr muhim.'],
+    ],
+    serviceTags: ['hammom dizayn', 'plitka', 'gidroizolyatsiya'],
+    relatedLinks: [
+      { href: '/uy-ta’mirlash', label: 'Uy ta’mirlash', text: 'Umumiy interyer yangilash.' },
+      { href: '/santexnika-tekshiruv', label: 'Santexnika tekshiruv', text: 'Ishdan oldin tizimni ko‘rish.' },
+      { href: '/kran-almashtirish', label: 'Kran almashtirish', text: 'Rakvina va kran yangilash.' },
+    ],
+  }),
+  '/yangi-rozetka-ornatish': makeSeoPage({
+    demandLayer: 'upgrade',
+    service: 'Elektrik',
+    city: 'Toshkent',
+    h1: 'Yangi rozetka o‘rnatish',
+    title: 'Yangi rozetka o‘rnatish: elektrik, narx va xavfsizlik | UstaFix',
+    description:
+      'Yangi rozetka o‘rnatish, qo‘shimcha elektr nuqta chiqarish, texnika uchun alohida liniya va Toshkentdagi elektrik ustalar.',
+    intro:
+      'Bu upgrade sahifasi yangi texnika, oshxona, ish stoli yoki konditsioner uchun qo‘shimcha rozetka kerak bo‘lganda lead oladi.',
+    explanationTitle: 'Yangi rozetka qanday o‘rnatiladi?',
+    explanation:
+      'Usta mavjud liniya yuklamasini tekshiradi, rozetka joyini belgilaydi, kabel yo‘lini tanlaydi va xavfsiz ulanishni sinaydi. Kuchli texnika uchun alohida liniya kerak bo‘lishi mumkin.',
+    priceRange: 'Taxminan 100 000 - 400 000 so‘m',
+    priceNote: 'Narx devor turi, kabel masofasi va alohida avtomat kerakligiga qarab farq qiladi.',
+    signalsTitle: 'Qachon yangi rozetka kerak?',
+    signals: ['Uzatgichlardan ko‘p foydalanilyapti', 'Yangi texnika qo‘yildi', 'Oshxona yoki ish joyi qayta rejalanyapti'],
+    faq: [
+      ['Mavjud rozetkadan ulash xavfsizmi?', 'Yuklama yetarli bo‘lsa mumkin, aks holda alohida liniya kerak.'],
+      ['Devor buziladimi?', 'Yashirin kabel uchun kesish bo‘lishi mumkin, tashqi kabel-kanal ham variant.'],
+      ['Konditsioner uchun oddiy rozetka bo‘ladimi?', 'Model quvvatiga qarab alohida liniya tavsiya qilinishi mumkin.'],
+    ],
+    serviceTags: ['yangi rozetka', 'elektrik', 'upgrade'],
+    relatedLinks: [
+      { href: '/elektrik-ornatish', label: 'Elektrik o‘rnatish', text: 'Umumiy elektr montaj ishlari.' },
+      { href: '/elektrik-chilonzor', label: 'Elektrik Chilonzor', text: 'Hududiy elektrik sahifasi.' },
+      { href: '/oshxona-remont', label: 'Oshxona remont', text: 'Rozetka rejalash ko‘p kerak bo‘ladigan xona.' },
+    ],
+  }),
+}
+
+const PAGE_DEFINITIONS = {
+  ...SERVICE_PAGES,
+  ...PROBLEM_PAGES,
+  ...MAINTENANCE_PAGES,
+  ...UPGRADE_PAGES,
+  '/': HOME_PAGE,
+}
+
+const SERVICE_CARDS = [
+  {
+    href: '/kran-oqyapti',
+    title: 'Emergency xizmatlar',
+    text: 'Kran oqishi, sovutmayotgan konditsioner va shoshilinch muammolar.',
+  },
+  {
+    href: '/kran-almashtirish',
+    title: 'Maintenance xizmatlar',
+    text: 'Kran almashtirish, servis, tekshiruv va rejali ta’mir ishlari.',
+  },
+  {
+    href: '/uy-ta’mirlash',
+    title: 'Upgrade xizmatlar',
+    text: 'Uy, oshxona, hammom va yangi rozetka kabi yaxshilash ishlari.',
+  },
+  {
+    href: '/santexnik-toshkent',
+    title: 'Local SEO sahifalar',
+    text: 'Toshkent, Chilonzor va keyingi hududlar uchun xizmat sahifalari.',
+  },
+]
+
+const TRUST_POINTS = [
+  {
+    title: 'Qidiruvga mos kontent',
+    text: 'Har sahifa o‘z H1, description va ichki linklari bilan tayyor.',
+  },
+  {
+    title: 'Lead-first dizayn',
+    text: 'Call va forma birinchi o‘rinda, ortiqcha marketplace vazifalari yo‘q.',
+  },
+  {
+    title: 'Firebase saqlash',
+    text: 'Faqat requestlar `requests` collection’iga tushadi.',
+  },
+]
+
+function getPage(pathname) {
+  if (pathname in PAGE_DEFINITIONS) {
+    return PAGE_DEFINITIONS[pathname]
+  }
+
+  return {
+    kind: 'notfound',
+    title: 'Sahifa topilmadi - UstaFix',
+    description: 'UstaFix sahifasi topilmadi. Bosh sahifaga qayting.',
+    intro: 'Siz izlagan sahifa mavjud emas yoki keyinroq qo‘shiladi.',
+    bullets: ['Bosh sahifaga qayting', 'Xizmat sahifalarini ko‘ring', 'Lead qoldiring'],
+    faq: [],
+    serviceTags: [],
+  }
+}
+
+function normalizeWorker(worker) {
+  const phone = worker.phone || worker.contactPhone || ''
+  const phoneDigits = phone.replace(/\s+/g, '')
+
+  return {
+    id: worker.id || phoneDigits || worker.name,
+    name: worker.name || 'Usta',
+    service: worker.service || worker.category || 'Xizmat',
+    city: worker.city || worker.region || 'Toshkent',
+    area: worker.area || worker.district || '',
+    phone,
+    telegram: worker.telegram || worker.telegramUrl || '',
+    whatsapp:
+      worker.whatsapp ||
+      (phoneDigits ? `https://wa.me/${phoneDigits.replace(/^\+/, '')}` : ''),
+    rating: Number(worker.rating ?? 5),
+    reviews: Number(worker.reviews ?? 0),
+    available: worker.available ?? true,
+    skills: Array.isArray(worker.skills) ? worker.skills : [],
+    bio: worker.bio || worker.description || '',
+  }
+}
+
+function WorkerCard({ worker }) {
+  const phoneHref = `tel:${worker.phone.replace(/\s+/g, '')}`
+
   return (
-    <div className="card fade-in" style={{ display:"flex", flexDirection:"column" }}>
-      <div style={{ height:4, background:w.color }} />
-      <div style={{ padding:24, flex:1 }}>
-        <div style={{ display:"flex", gap:14, alignItems:"center", marginBottom:14 }}>
-          <div style={{ width:56, height:56, borderRadius:18, background:w.color+"22", border:`2px solid ${w.color}33`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>{w.emoji}</div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, fontSize:16, marginBottom:2 }}>{w.name}</div>
-            <div style={{ color:w.color, fontSize:13, fontWeight:600 }}>{w.specialty}</div>
+    <article className="worker-card">
+      <div className="worker-card__top">
+        <div>
+          <span className="worker-chip">{worker.service}</span>
+          <h3>{worker.name}</h3>
+          <p className="worker-meta">
+            {worker.city}
+            {worker.area ? ` · ${worker.area}` : ''}
+          </p>
+        </div>
+        <span className={`status-badge ${worker.available ? 'online' : 'busy'}`}>
+          {worker.available ? 'Ushbu hafta bor' : 'Band'}
+        </span>
+      </div>
+
+      <p className="worker-bio">{worker.bio || 'Tez bog‘lanish uchun tayyor usta.'}</p>
+
+      <div className="rating-row" aria-label="Worker rating">
+        <strong>{worker.rating.toFixed(1)}</strong>
+        <span>• {worker.reviews} ta fikr</span>
+      </div>
+
+      <div className="skill-row">
+        {worker.skills.map((skill) => (
+          <span key={skill} className="skill-pill">
+            {skill}
+          </span>
+        ))}
+      </div>
+
+      <div className="worker-actions">
+        <a className="primary-btn" href={phoneHref}>
+          Qo‘ng‘iroq
+        </a>
+        {worker.whatsapp ? (
+          <a className="secondary-btn" href={worker.whatsapp} target="_blank" rel="noreferrer">
+            WhatsApp
+          </a>
+        ) : null}
+        {worker.telegram ? (
+          <a className="secondary-btn" href={worker.telegram} target="_blank" rel="noreferrer">
+            Telegram
+          </a>
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
+function WorkerDirectory({ page, workers, workersStatus, workersMessage }) {
+  const defaultWorkerFilter = page.workerFilter || {}
+  const [serviceFilter, setServiceFilter] = useState(defaultWorkerFilter.service || (page.kind === 'home' ? 'Barchasi' : page.service || 'Barchasi'))
+  const [cityFilter, setCityFilter] = useState(defaultWorkerFilter.city || page.city || 'Toshkent')
+
+  const workerFilters = SERVICE_OPTIONS.map((service) => ({ label: service, value: service }))
+  const cityFilters = ['Toshkent', 'Samarqand', 'Fargona', 'Buxoro']
+  const filteredWorkers = workers.filter((worker) => {
+    const serviceMatches = serviceFilter === 'Barchasi' || worker.service === serviceFilter
+    const cityMatches = cityFilter ? worker.city === cityFilter : true
+    const areaMatches = defaultWorkerFilter.area ? worker.area === defaultWorkerFilter.area : true
+    return serviceMatches && cityMatches && areaMatches
+  })
+
+  return (
+    <section className="content-band">
+      <div className="container">
+        <div className="section-head">
+          <span className="eyebrow">Ustalar</span>
+          <h2>Haqiqiy odamlar bilan bog‘laning</h2>
+          <p>
+            Foydalanuvchi xizmatni tanlaydi, filtrlardan o‘tadi va to‘g‘ridan-to‘g‘ri ustaga qo‘ng‘iroq qiladi yoki xabar yozadi.
+            {defaultWorkerFilter.area ? ` Bu sahifa ${defaultWorkerFilter.area} hududidagi ustalarni ko‘rsatishga ham yo‘naltirilgan.` : ''}
+          </p>
+        </div>
+
+        <div className="filter-row">
+          <div className="filter-group">
+            <span>Xizmat</span>
+            <div className="filter-pills">
+              {workerFilters.map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  className={`filter-pill ${serviceFilter === filter.value ? 'active' : ''}`}
+                  onClick={() => setServiceFilter(filter.value)}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div style={{ background: w.available ? "#06D6A018" : "#66666618", border:`1px solid ${w.available?"#06D6A040":"#66666640"}`, borderRadius:8, padding:"4px 10px", color:w.available?"#06D6A0":"#666", fontSize:11, fontWeight:700, flexShrink:0 }}>
-            {w.available ? "Bo'sh" : "Band"}
+
+          <div className="filter-group">
+            <span>Shahar</span>
+            <div className="filter-pills">
+              {cityFilters.map((city) => (
+                <button
+                  key={city}
+                  type="button"
+                  className={`filter-pill ${cityFilter === city ? 'active' : ''}`}
+                  onClick={() => setCityFilter(city)}
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        <div style={{ color:"#666", fontSize:13, lineHeight:1.6, marginBottom:14 }}>{w.desc}</div>
-        <div style={{ display:"flex", gap:14, marginBottom:14, fontSize:13 }}>
-          <span style={{ color:"#666" }}>📍 {w.location}</span>
-          <span style={{ color:"#FFB703" }}>⭐ {w.rating} ({w.reviews})</span>
-        </div>
-        <div style={{ color:"#fff", fontWeight:700, fontSize:15, marginBottom:16 }}>💰 {w.price} so'mdan</div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button onClick={() => onLike(w.id)} style={{
-            flex:1, padding:"10px", borderRadius:12, cursor:"pointer",
-            background: liked.includes(w.id) ? "#FF6B3520" : "#1e1e1e",
-            color: liked.includes(w.id) ? "#FF6B35" : "#666",
-            border: liked.includes(w.id) ? "1px solid #FF6B3540" : "1px solid #252525",
-            fontWeight:600, fontSize:13, transition:"all 0.2s",
-          }}>{liked.includes(w.id) ? "❤️ Yoqdi" : "🤍 Yoqdi"}</button>
-          {!dealed.includes(w.id) ? (
-            <button onClick={() => onDeal(w)} style={{ flex:1.5, padding:"10px", borderRadius:12, border:"none", cursor:"pointer", background:"linear-gradient(135deg,#FF6B35,#FF8C42)", color:"#fff", fontWeight:700, fontSize:13, transition:"all 0.2s" }}>🤝 Deal</button>
+
+        {workersMessage ? <p className="workers-note">{workersMessage}</p> : null}
+
+        <div className="worker-grid">
+          {workersStatus === 'loading' ? (
+            <div className="worker-skeleton">Ustalar yuklanmoqda...</div>
+          ) : filteredWorkers.length > 0 ? (
+            filteredWorkers.map((worker) => <WorkerCard key={worker.id} worker={worker} />)
           ) : (
-            <div style={{ flex:1.5, padding:"10px", borderRadius:12, background:"#06D6A018", border:"1px solid #06D6A040", color:"#06D6A0", fontWeight:700, fontSize:13, textAlign:"center" }}>✅ Dealed</div>
+            <div className="worker-empty">
+              Tanlangan filtrlar uchun usta topilmadi. Boshqa xizmat yoki shaharni sinab ko‘ring.
+            </div>
           )}
         </div>
       </div>
-    </div>
-  );
+    </section>
+  )
 }
+
+function SeoProblemSection({ page }) {
+  if (!page.priceRange || !page.explanation) {
+    return null
+  }
+
+  const signals = page.signals || []
+
+  return (
+    <section className="content-band alt">
+      <div className="container split-grid">
+        <div className="section-head compact">
+          <span className="eyebrow">Muammo tahlili</span>
+          <h2>{page.explanationTitle || 'Muammo qanday hal qilinadi?'}</h2>
+          <p>{page.explanation}</p>
+        </div>
+
+        <div className="price-card">
+          <span className="eyebrow">Taxminiy narx</span>
+          <strong>{page.priceRange}</strong>
+          <p>{page.priceNote || 'Narx ish hajmi va hududga qarab o‘zgaradi.'}</p>
+        </div>
+      </div>
+
+      {signals.length > 0 ? (
+        <div className="container signal-grid">
+          <div className="section-head compact">
+            <span className="eyebrow">{page.signalsTitle || 'Belgilari'}</span>
+            <h2>Nimani sezish mumkin?</h2>
+          </div>
+          <div className="signal-list">
+            {signals.map((signal) => (
+              <article key={signal} className="signal-card">
+                {signal}
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function RelatedLinksSection({ page }) {
+  const relatedLinks = page.relatedLinks || []
+
+  if (relatedLinks.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="content-band">
+      <div className="container">
+        <div className="section-head">
+          <span className="eyebrow">Ichki linklar</span>
+          <h2>Yaqin qidiruvlar</h2>
+          <p>Bu sahifadan foydalanuvchi o‘xshash muammolar yoki hududiy sahifalarga o‘tishi mumkin.</p>
+        </div>
+        <div className="related-grid">
+          {relatedLinks.map((link) => (
+            <a key={link.href} className="related-card" href={link.href}>
+              <strong>{link.label}</strong>
+              <span>{link.text}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function LeadFormCard({ page, pathname }) {
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    service: page.kind === 'home' ? 'Barchasi' : page.service || 'Santexnik',
+    city: page.city || 'Toshkent',
+    problem: '',
+  })
+  const [status, setStatus] = useState('idle')
+  const [message, setMessage] = useState('')
+
+  const submitLead = async (event) => {
+    event.preventDefault()
+
+    if (!form.name.trim() || !form.phone.trim() || !form.problem.trim()) {
+      setStatus('error')
+      setMessage("Ism, telefon va muammo maydonlarini to'ldiring.")
+      return
+    }
+
+    setStatus('sending')
+    setMessage('')
+
+    try {
+      const { createRequest } = await import('./firebase/requests')
+      await createRequest({
+        ...form,
+        phone: form.phone.replace(/\s+/g, ''),
+        sourcePath: pathname,
+        pageKind: page.kind,
+      })
+      setStatus('success')
+      setMessage('Murojaat qabul qilindi. Tez orada bog‘lanamiz.')
+      setForm((current) => ({
+        ...current,
+        name: '',
+        phone: '',
+        problem: '',
+      }))
+    } catch (error) {
+      console.error(error)
+      setStatus('error')
+      setMessage('Firebasega yozishda xatolik. Config va rules ni tekshiring.')
+    }
+  }
+
+  return (
+    <div className="request-card" id="lead-form">
+      <div className="section-head compact">
+        <span className="eyebrow">Buyurtma</span>
+        <h2>Formani yuboring</h2>
+        <p>Qaysi xizmat kerakligini yozing, biz leadni saqlaymiz va mos usta bilan bog‘lashga tayyorlaymiz.</p>
+      </div>
+
+      <form className="request-form" onSubmit={submitLead}>
+        <label>
+          Ism
+          <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Ismingiz" />
+        </label>
+
+        <label>
+          Telefon
+          <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="+998 90 123 45 67" />
+        </label>
+
+        <div className="two-up">
+          <label>
+            Xizmat
+            <select value={form.service} onChange={(event) => setForm({ ...form, service: event.target.value })}>
+              {SERVICE_OPTIONS.map((service) => (
+                <option key={service} value={service}>{service}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Shahar
+            <select value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })}>
+              <option value="Toshkent">Toshkent</option>
+              <option value="Samarqand">Samarqand</option>
+              <option value="Fargona">Fargona</option>
+              <option value="Buxoro">Buxoro</option>
+            </select>
+          </label>
+        </div>
+
+        <label>
+          Muammo
+          <textarea
+            rows="5"
+            value={form.problem}
+            onChange={(event) => setForm({ ...form, problem: event.target.value })}
+            placeholder="Masalan: kran oqyapti, svet uzilib qoldi, konditsioner sovutmayapti..."
+          />
+        </label>
+
+        <button type="submit" disabled={status === 'sending'}>
+          {status === 'sending' ? 'Yuborilmoqda...' : 'Lead yuborish'}
+        </button>
+
+        {message ? <p className={`status-message ${status}`}>{message}</p> : null}
+      </form>
+    </div>
+  )
+}
+
+function usePathname() {
+  const [pathname, setPathname] = useState(window.location.pathname)
+
+  useEffect(() => {
+    const onPopState = () => setPathname(window.location.pathname)
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const navigate = (href) => {
+    if (href === window.location.pathname) return
+    window.history.pushState({}, '', href)
+    setPathname(href)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  return [pathname, navigate]
+}
+
+function SeoHead({ page, path }) {
+  useEffect(() => {
+    document.title = page.title
+
+    const setMeta = (selector, attr, value) => {
+      let element = document.head.querySelector(selector)
+      if (!element) {
+        element = document.createElement('meta')
+        if (selector.includes('property')) {
+          element.setAttribute('property', selector.match(/property="([^"]+)"/)?.[1] || '')
+        }
+        if (selector.includes('name')) {
+          element.setAttribute('name', selector.match(/name="([^"]+)"/)?.[1] || '')
+        }
+        document.head.appendChild(element)
+      }
+      element.setAttribute(attr, value)
+    }
+
+    const canonical = document.head.querySelector('link[rel="canonical"]') || document.createElement('link')
+    canonical.setAttribute('rel', 'canonical')
+    canonical.setAttribute('href', `${SITE_URL}${path}`)
+    if (!canonical.parentNode) document.head.appendChild(canonical)
+
+    setMeta('meta[name="description"]', 'name', 'description')
+    document.head.querySelector('meta[name="description"]').setAttribute('content', page.description)
+
+    const ogTitle = document.head.querySelector('meta[property="og:title"]') || document.createElement('meta')
+    ogTitle.setAttribute('property', 'og:title')
+    ogTitle.setAttribute('content', page.title)
+    if (!ogTitle.parentNode) document.head.appendChild(ogTitle)
+
+    const ogDesc = document.head.querySelector('meta[property="og:description"]') || document.createElement('meta')
+    ogDesc.setAttribute('property', 'og:description')
+    ogDesc.setAttribute('content', page.description)
+    if (!ogDesc.parentNode) document.head.appendChild(ogDesc)
+
+    const ogUrl = document.head.querySelector('meta[property="og:url"]') || document.createElement('meta')
+    ogUrl.setAttribute('property', 'og:url')
+    ogUrl.setAttribute('content', `${SITE_URL}${path}`)
+    if (!ogUrl.parentNode) document.head.appendChild(ogUrl)
+
+    const twitterCard = document.head.querySelector('meta[name="twitter:card"]') || document.createElement('meta')
+    twitterCard.setAttribute('name', 'twitter:card')
+    twitterCard.setAttribute('content', 'summary_large_image')
+    if (!twitterCard.parentNode) document.head.appendChild(twitterCard)
+
+    const jsonLdId = 'ustafix-jsonld'
+    const existing = document.head.querySelector(`script#${jsonLdId}`)
+    if (existing) existing.remove()
+
+    const schema =
+      page.kind === 'home'
+        ? {
+            '@context': 'https://schema.org',
+            '@type': 'LocalBusiness',
+            name: 'UstaFix',
+            url: `${SITE_URL}${path}`,
+            areaServed: 'Uzbekistan',
+            description: page.description,
+            serviceType: 'Home repair lead generation',
+          }
+        : {
+            '@context': 'https://schema.org',
+            '@type': 'Service',
+            name: page.title,
+            url: `${SITE_URL}${path}`,
+            description: page.description,
+            provider: {
+              '@type': 'Organization',
+              name: 'UstaFix',
+              url: SITE_URL,
+            },
+          }
+
+    const script = document.createElement('script')
+    script.type = 'application/ld+json'
+    script.id = jsonLdId
+    script.textContent = JSON.stringify(schema)
+    document.head.appendChild(script)
+  }, [page, path])
+
+  return null
+}
+
+function navigateTo(navigate, href) {
+  return (event) => {
+    event.preventDefault()
+    navigate(href)
+  }
+}
+
+function App() {
+  const [pathname, navigate] = usePathname()
+  const page = useMemo(() => getPage(pathname), [pathname])
+  const [workers, setWorkers] = useState(DEFAULT_WORKERS)
+  const [workersStatus, setWorkersStatus] = useState('loading')
+  const [workersMessage, setWorkersMessage] = useState('')
+
+  useEffect(() => {
+    let isActive = true
+
+    const loadWorkers = async () => {
+      try {
+        const { getWorkers } = await import('./firebase/workers')
+        const remoteWorkers = await getWorkers()
+        if (!isActive) return
+
+        const normalizedWorkers = remoteWorkers.map(normalizeWorker)
+        setWorkers(normalizedWorkers.length > 0 ? normalizedWorkers : DEFAULT_WORKERS)
+        setWorkersStatus('ready')
+        setWorkersMessage(normalizedWorkers.length > 0 ? '' : 'Hozircha demo ustalar ko‘rsatilmoqda.')
+      } catch (error) {
+        console.error(error)
+        if (!isActive) return
+
+        setWorkers(DEFAULT_WORKERS)
+        setWorkersStatus('fallback')
+        setWorkersMessage('Firebase ulanmagan, demo ustalar ko‘rsatilmoqda.')
+      }
+    }
+
+    loadWorkers()
+
+    return () => {
+      isActive = false
+    }
+  }, [])
+
+  const pageFaq = page.faq || []
+  const pageBullets = page.bullets || []
+  const serviceTags = page.serviceTags || []
+
+  return (
+    <main>
+      <SeoHead page={page} path={pathname} />
+
+      <header className="topbar">
+        <button className="brand" onClick={() => navigate('/')}>UstaFix</button>
+        <nav className="nav">
+          {NAV_ITEMS.map((item) => (
+            <a key={item.href} href={item.href} onClick={navigateTo(navigate, item.href)}>
+              {item.label}
+            </a>
+          ))}
+        </nav>
+        <a className="call-pill" href={`tel:${PHONE_NUMBER.replace(/\s+/g, '')}`}>Qo‘ng‘iroq</a>
+      </header>
+
+      <section className="hero-section">
+        <div className="container hero-grid">
+          <div className="hero-copy">
+            <span className="eyebrow">SEO-first xizmat sayti</span>
+            <h1>{page.h1 || page.title}</h1>
+            <p className="lead">{page.description}</p>
+            <p className="sublead">{page.intro}</p>
+
+            <div className="action-row">
+              <a className="primary-btn" href={`tel:${PHONE_NUMBER.replace(/\s+/g, '')}`}>Telefon qilish</a>
+              <a className="secondary-btn" href={TELEGRAM_URL}>Telegram</a>
+              <a className="secondary-btn" href={WHATSAPP_URL}>WhatsApp</a>
+            </div>
+
+            <div className="tag-row">
+              {serviceTags.map((tag) => (
+                <span key={tag} className="tag">{tag}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="hero-visual">
+            <img src={heroArt} alt="UstaFix xizmatlar vizuali" />
+            <div className="visual-card">
+              <strong>Qidiruvdan kelgan mijoz</strong>
+              <span>Bir klikda aloqa yoki forma</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="strip">
+        <div className="container strip-grid">
+          <div>
+            <strong>Qidiruvga mos</strong>
+            <span>Har sahifa alohida so‘z birikmalariga tayyor.</span>
+          </div>
+          <div>
+            <strong>Tez aloqa</strong>
+            <span>Telefon, Telegram va WhatsApp linklari tayyor.</span>
+          </div>
+          <div>
+            <strong>Lead capture</strong>
+            <span>Firestore requests collection’iga yoziladi.</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="content-band">
+        <div className="container">
+          <div className="section-head">
+            <span className="eyebrow">Xizmatlar</span>
+            <h2>Odamlar qidiradigan sahifalar va ustalar</h2>
+            <p>
+              Biz marketplace murakkabligini kamaytirdik. Public tomonda search-friendly sahifalar, ustalar ro‘yxati va leadga olib boradigan CTA qoldi.
+            </p>
+          </div>
+          <div className="card-grid">
+            {SERVICE_CARDS.map((item) => (
+              <a key={item.href} className="info-card" href={item.href} onClick={navigateTo(navigate, item.href)}>
+                <strong>{item.title}</strong>
+                <span>{item.text}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {pageBullets.length > 0 ? (
+        <section className="content-band alt">
+          <div className="container">
+            <div className="section-head compact">
+              <span className="eyebrow">Nima qilamiz</span>
+              <h2>Asosiy ishlar</h2>
+            </div>
+            <div className="bullet-grid">
+              {pageBullets.map((bullet) => (
+                <div key={bullet} className="bullet-card">
+                  {bullet}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <SeoProblemSection page={page} />
+
+      <WorkerDirectory
+        key={pathname}
+        page={page}
+        pathname={pathname}
+        workers={workers}
+        workersStatus={workersStatus}
+        workersMessage={workersMessage}
+      />
+
+      <RelatedLinksSection page={page} />
+
+      <section className="content-band alt">
+        <div className="container split-grid">
+          <div className="section-head compact">
+            <span className="eyebrow">Nega UstaFix</span>
+            <h2>Local SEO uchun kerakli tuzilma</h2>
+            <p>
+              Bu saytda shahar, xizmat va kontakt yo‘llari ajratilgan. Bu Google uchun ancha toza va o‘qilishi oson struktura beradi.
+            </p>
+          </div>
+          <div className="trust-list">
+            {TRUST_POINTS.map((item) => (
+              <article key={item.title} className="trust-card">
+                <strong>{item.title}</strong>
+                <p>{item.text}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="content-band">
+        <div className="container split-grid">
+          <div>
+            <div className="section-head compact">
+              <span className="eyebrow">Qanday ishlaydi</span>
+              <h2>Call-first yo‘l</h2>
+            </div>
+            <ol className="steps">
+              <li>
+                <strong>1. Qidiring yoki tanlang</strong>
+                <span>Odam Google’dan xizmat sahifasini topadi.</span>
+              </li>
+              <li>
+                <strong>2. Bog‘lanadi</strong>
+                <span>Telefon, Telegram yoki WhatsApp orqali aloqa qiladi.</span>
+              </li>
+              <li>
+                <strong>3. Lead tushadi</strong>
+                <span>Forma to‘ldirilsa Firestore’ga saqlanadi.</span>
+              </li>
+            </ol>
+          </div>
+
+          <LeadFormCard key={pathname} page={page} pathname={pathname} />
+        </div>
+      </section>
+
+      {pageFaq.length > 0 ? (
+        <section className="content-band alt">
+          <div className="container">
+            <div className="section-head">
+              <span className="eyebrow">FAQ</span>
+              <h2>Ko‘p so‘raladigan savollar</h2>
+            </div>
+            <div className="faq-list">
+              {pageFaq.map(([question, answer]) => (
+                <details key={question} className="faq-item">
+                  <summary>{question}</summary>
+                  <p>{answer}</p>
+                </details>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="content-band">
+        <div className="container footer-cta">
+          <div>
+            <span className="eyebrow">Kontakt</span>
+            <h2>UstaFix bilan tez bog‘laning</h2>
+            <p>
+              Telefon, Telegram yoki WhatsApp orqali murojaat qiling. Lead form esa Firestore’da saqlanadi va keyin ustaga biriktiriladi.
+            </p>
+          </div>
+          <div className="action-column">
+            <a className="primary-btn" href={`tel:${PHONE_NUMBER.replace(/\s+/g, '')}`}>Qo‘ng‘iroq qilish</a>
+            <a className="secondary-btn dark" href={TELEGRAM_URL}>Telegram</a>
+            <a className="secondary-btn dark" href={WHATSAPP_URL}>WhatsApp</a>
+          </div>
+        </div>
+      </section>
+
+      <footer className="footer">
+        <div className="container footer-grid">
+          <div>
+            <strong>UstaFix</strong>
+            <p>O‘zbekistonda uy ta’miri xizmatlari uchun SEO-first lead sayti.</p>
+          </div>
+          <div className="footer-links">
+            {NAV_ITEMS.map((item) => (
+              <a key={item.href} href={item.href} onClick={navigateTo(navigate, item.href)}>
+                {item.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      </footer>
+    </main>
+  )
+}
+
+export default App
